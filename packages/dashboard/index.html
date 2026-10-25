@@ -30,14 +30,16 @@
      background breathes without ever pulling the eye from the feed. Still under reduced motion. */
   .sky { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
   .sky i { position: absolute; border-radius: 50%; filter: blur(70px); will-change: transform; opacity: 0.95; }
-  .sky .b1 { width: 70vw; height: 70vh; left: -22vw; bottom: -30vh; background: rgba(188, 52, 36, 0.95); animation: drift1 14s ease-in-out infinite alternate; }
-  .sky .b2 { width: 50vw; height: 50vh; left: -10vw; top: -22vh; background: rgba(160, 84, 40, 0.85); animation: drift2 18s ease-in-out infinite alternate; }
-  .sky .b3 { width: 60vw; height: 70vh; right: -22vw; top: -28vh; background: rgba(84, 140, 160, 0.90); animation: drift3 16s ease-in-out infinite alternate; }
-  .sky .b4 { width: 45vw; height: 55vh; right: -16vw; bottom: -24vh; background: rgba(70, 110, 140, 0.70); animation: drift4 20s ease-in-out infinite alternate; }
-  @keyframes drift1 { from { transform: translate(0, 0) scale(1); } to { transform: translate(12vw, -8vh) scale(1.12); } }
-  @keyframes drift2 { from { transform: translate(0, 0) scale(1); } to { transform: translate(14vw, 10vh) scale(0.9); } }
-  @keyframes drift3 { from { transform: translate(0, 0) scale(1); } to { transform: translate(-14vw, 12vh) scale(1.1); } }
-  @keyframes drift4 { from { transform: translate(0, 0) scale(1); } to { transform: translate(-10vw, -12vh) scale(1.15); } }
+  .sky .b1 { width: 70vw; height: 70vh; left: -22vw; bottom: -30vh; background: rgba(188, 52, 36, 0.95); animation: drift1 22s ease-in-out infinite alternate; }
+  .sky .b2 { width: 50vw; height: 50vh; left: -10vw; top: -22vh; background: rgba(160, 84, 40, 0.85); animation: drift2 26s ease-in-out infinite alternate; }
+  .sky .b3 { width: 60vw; height: 70vh; right: -22vw; top: -28vh; background: rgba(84, 140, 160, 0.90); animation: drift3 22s ease-in-out infinite alternate; }
+  .sky .b4 { width: 45vw; height: 55vh; right: -16vw; bottom: -24vh; background: rgba(70, 110, 140, 0.70); animation: drift4 26s ease-in-out infinite alternate; }
+  /* The warm blobs cross to the right while the cool ones cross to the left, so red and blue
+     swap sides every cycle and meet in the middle on the way. */
+  @keyframes drift1 { from { transform: translate(0, 0) scale(1); } 50% { transform: translate(45vw, -30vh) scale(1.2); } to { transform: translate(92vw, 0) scale(1); } }
+  @keyframes drift2 { from { transform: translate(0, 0) scale(1); } 50% { transform: translate(40vw, 30vh) scale(0.85); } to { transform: translate(88vw, 0) scale(1); } }
+  @keyframes drift3 { from { transform: translate(0, 0) scale(1); } 50% { transform: translate(-45vw, 35vh) scale(1.2); } to { transform: translate(-92vw, 0) scale(1); } }
+  @keyframes drift4 { from { transform: translate(0, 0) scale(1); } 50% { transform: translate(-40vw, -35vh) scale(0.9); } to { transform: translate(-88vw, 0) scale(1); } }
   @media (prefers-reduced-motion: reduce) { .sky i { animation: none; } }
   body::before { /* film grain */
     content: ""; position: fixed; inset: 0; pointer-events: none; opacity: 0.22; mix-blend-mode: overlay; z-index: 0;
