@@ -29,7 +29,7 @@ async function pollCoord() {
     const s = await getJson(`${COORD}/state`, 4000);
     state = s;
     const addr = (health?.provider || me?.address || '').toLowerCase();
-    me = s.providers.find((p) => p.address.toLowerCase() === addr) || s.providers.find((p) => p.endpoint === NODE_URL) || me;
+    me = s.providers.find((p) => p.address.toLowerCase() === addr) || s.providers.find((p) => p.endpoint === NODE_URL) || null; // not listed = not registered (e.g. after a coordinator reset)
   } catch { /* keep last */ }
 }
 
@@ -40,7 +40,7 @@ function render() {
   const role = args.role || (health?.cheat ? 'cheater' : '');
   const addr = me?.address || health?.provider || '';
   const big = BIG[LETTER.toUpperCase()] || ['       ', `   ${LETTER}   `, '       '];
-  const status = !health ? red('offline') : me?.status === 'suspended' ? red('suspended') : me?.status === 'active' ? (me.online === false ? yellow('offline') : green('active')) : yellow(me?.status || 'joining');
+  const status = !health ? red('offline') : !me ? yellow('not registered with the coordinator') : me.status === 'suspended' ? red('suspended') : me.status === 'active' ? (me.online === false ? yellow('offline') : green('active')) : yellow(me.status || 'joining');
   line(`${bold(cyan(big[0]))}   ${bold(`NODE ${LETTER.toUpperCase()}`)}${role ? dim(`  ${role}`) : ''}`);
   line(`${bold(cyan(big[1]))}   ${status}${me ? dim(`  score ${Number(me.score).toFixed(2)}`) : ''}`);
   line(`${bold(cyan(big[2]))}   ${dim(addr ? `${addr.slice(0, 8)}…${addr.slice(-4)}` : '')}`);
