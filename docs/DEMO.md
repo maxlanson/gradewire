@@ -78,9 +78,11 @@ node --env-file=.env scripts/fund-nodes.mjs --address 0x… --address 0x… --ad
 scripts/demo-windows.sh "A http://127.0.0.1:4421 honest" "B http://127.0.0.1:4422 unreliable" "C http://127.0.0.1:4423 cheater"   # three small panel windows
 ```
 
+**Resetting between pitches in about five seconds.** Once, before the day starts: `scripts/prep-cheaters.sh 10` (about a minute per identity: each cheater key is funded, registered, benchmarked, attested and bonded on-chain inside the C VM). Then before every pitch: `scripts/demo-reset.sh`. It wipes the coordinator's session (jobs, payments, verdicts, incidents; the dashboard reloads itself; Nodes A and B keep running with their counters back to "new"), drops the slashed cheater and starts Node C on the next prepared identity, which the coordinator admits without a new benchmark because it is already attested on-chain. The agent needs nothing: a new cheater simply inherits the old one's Channel from the pool.
+
 On stage, after the parts are dispatched and Node B (vm) shows "running" in its panel: `limactl stop node-b` (the lid closes). The agent reroutes within seconds, the dashboard flags it offline after 20 s, its panel goes red. Bring it back with `limactl start node-b && scripts/vm-node.sh node-b 4422 --label "Node B (vm)"`.
 
-After a slash the cheater's key is burned: `limactl shell node-c -- rm -rf ~/gradewire/.state/node-4423`, re-run its `vm-node.sh` line and fund the new address. A coordinator reset forgets the VM nodes; re-run the three `vm-node.sh` lines (no new funding).
+Without prepared identities, a slash burns the cheater's key: `limactl shell node-c -- rm -rf ~/gradewire/.state/node-4423`, re-run its `vm-node.sh` line and fund the new address (about a minute). A full coordinator restart with a deleted database forgets the VM nodes; re-run the three `vm-node.sh` lines (no new funding). `scripts/demo-reset.sh` avoids both.
 
 ## On stage
 
