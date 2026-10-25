@@ -224,6 +224,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
   const paused = new Set(); // not paid again this run: unreachable, stuck payment, or last job unverified
   const pausedWhy = new Map(); // address -> reason; an 'unreachable' node may rejoin once the coordinator sees it online again
   const pausedAt = new Map(); // address -> when; a rejoin needs a heartbeat newer than this
+  const holding = new Map(); // address -> item id a worker is currently paying for / awaiting; a part is never queued while another worker holds it
   const events = [];
 
   async function purchaseGrade(p, item) {
@@ -307,7 +308,11 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
       log(tag, `trust ${next > previous ? 'up' : 'down'}: ${describeTrust(t)} (${t.clean_checks} clean check${t.clean_checks === 1 ? '' : 's'})`);
       await emit({ type: 'trust', provider: p.label, provider_address: p.address, previous_inflight: previous, ...t });
     };
-    const requeue = (r) => { if (!queue.some((q) => q.id === r.id)) queue.unshift({ id: r.id, files: r.files, attempts: r.attempts }); };
+    const requeue = (r) => {
+      const heldElsewhere = [...holding.entries()].some(([addr, id]) => id === r.id && addr !== p.address);
+      const settled = done.some((d) => d.id === r.id && (d.verdict === 'pass' || d.verdict === 'not_sampled'));
+      if (!queue.some((q) => q.id === r.id) && !heldElsewhere && !settled) queue.unshift({ id: r.id, files: r.files, attempts: r.attempts });
+    };
 
     const settleJob = async (current, paid) => {
       try {
@@ -372,6 +377,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         try { await resumeStranded(p.channelId); } catch (e) { log(tag, `an earlier payment on this channel is unresolved (${String(e.message).slice(0, 80)}); not paying it this run`); paused.add(p.address); break; }
         const next = queue.shift();
         if (!next) break;
+        holding.set(p.address, next.id);
         if (next.attempts >= 3) { log(agentTag, `giving up on ${next.id} after ${next.attempts} attempts`); await emit({ type: 'giveup', id: next.id, attempts: next.attempts }); continue; }
         const job = buildJob(next);
         let offer;
@@ -399,8 +405,9 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         await emit({ type: 'reroute', id: current.id, provider: p.label, reason: 'sandbox fault' });
         break;
       }
-      pending.set(current.job.job_id, settleJob(current, paid));
+      pending.set(current.job.job_id, settleJob(current, paid).finally(() => { if (holding.get(p.address) === current.id) holding.delete(p.address); }));
     }
+    holding.delete(p.address);
     await Promise.all(pending.values()); // every paid job of this node gets its verdict before the run moves on
   }
 
