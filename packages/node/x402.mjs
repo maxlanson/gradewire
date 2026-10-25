@@ -125,8 +125,11 @@ export function createX402Resources(config) {
       // (the Voucher is only valid inside that window) and was never submitted on-chain, so it must
       // not block this Channel for every later purchase: void it. (A retained payment that was
       // submitted keeps its transactionHash and is reconciled through chain events below.)
-      const voided = db.prepare("UPDATE payments SET complete=1 WHERE channel_id=? AND complete=0 AND json_extract(value, '$.challenge.value.validBefore') < ?").run(channelId, current - cutoffMarginSeconds);
-      if (voided.changes) console.log(`[x402] voided ${voided.changes} expired unredeemed payment(s) on channel ${channelId.slice(0, 10)}… after a restart; the Channel is usable again`);
+      // A retained payment the buyer has not replayed within about two minutes of its challenge
+      // (validBefore is issue time + 300 s) was abandoned by a buyer that rerouted the job: void it
+      // rather than refuse this Channel until the window closes.
+      const voided = db.prepare("UPDATE payments SET complete=1 WHERE channel_id=? AND complete=0 AND json_extract(value, '$.challenge.value.validBefore') < ?").run(channelId, current + 180);
+      if (voided.changes) console.log(`[x402] voided ${voided.changes} abandoned payment(s) on channel ${channelId.slice(0, 10)}… (not replayed for 2 min); the Channel is usable again`);
       if (db.prepare('SELECT 1 FROM payments WHERE channel_id=? AND complete=0').get(channelId)) return send(response, 409, { error: 'retry_retained_payment' });
       const existing = db.prepare('SELECT value FROM challenges WHERE channel_id=? AND url=?').get(channelId, resourceUrl);
       let challenge = existing ? JSON.parse(String(existing.value)) : undefined;

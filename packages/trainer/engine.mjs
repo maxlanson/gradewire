@@ -247,8 +247,8 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         break;
       } catch (error) {
         const unreachable = UNREACHABLE.test(String(describeError(error)));
-        if (attempt >= (unreachable ? 2 : 6)) throw new Error(`${unreachable ? 'node unreachable' : 'purchase failed'}: ${String(describeError(error)).slice(0, 120)}`);
-        log('[retry]', `purchase ${job.job_id}: ${String(describeError(error)).slice(0, 90)} (attempt ${attempt + 1}/${unreachable ? 2 : 6})`);
+        if (attempt >= (unreachable ? 2 : 3)) throw new Error(`${unreachable ? 'node unreachable' : 'purchase failed'}: ${String(describeError(error)).slice(0, 120)}`);
+        log('[retry]', `purchase ${job.job_id}: ${String(describeError(error)).slice(0, 90)} (attempt ${attempt + 1}/${unreachable ? 2 : 3})`);
         await new Promise((r) => setTimeout(r, (unreachable ? 1 : attempt) * 3000));
       }
     }
