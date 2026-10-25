@@ -5,7 +5,7 @@
 #   e.g. scripts/vm-node.sh node-a 4421 --coordinator https://...trycloudflare.com --label "Node A (vm)"
 # Creates the VM if missing (Ubuntu + Docker, 2 CPUs, 2 GB), installs Node.js and git, clones
 # the public repo, and starts the join in the background inside the VM. Prints the node's
-# address to fund. Logs: limactl shell <name> -- tail -f gradewire/.state/logs/join.log
+# address to fund. Logs: limactl shell <name> -- tail -f ~/gradewire/.state/logs/join.log
 # Stop the node (an "unreliable" laptop closing its lid): limactl stop <name>; limactl start <name>
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -34,6 +34,7 @@ fi
 say "provisioning (node.js, git, repo, packages, sandbox image)…"
 limactl shell "$NAME" -- bash -s <<'VM'
 set -e
+cd "$HOME"   # limactl shell starts in the host's cwd, mounted read-only inside the VM
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 22 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - >/dev/null 2>&1
   sudo apt-get install -y -q nodejs git >/dev/null 2>&1
@@ -48,12 +49,12 @@ echo "provisioned: node $(node --version), docker $(docker version --format '{{.
 VM
 
 say "starting the node (port $PORT is forwarded to this Mac's 127.0.0.1:$PORT)…"
-limactl shell "$NAME" -- bash -c "cd gradewire && pkill -f 'server.mjs --port $PORT' 2>/dev/null; nohup scripts/join.sh --coordinator '$COORDINATOR' --label '$LABEL' --port $PORT --public-url http://127.0.0.1:$PORT $CHEAT > .state/logs/join.log 2>&1 &"
+limactl shell "$NAME" -- bash -c "cd ~/gradewire && pkill -f 'server.mjs --port $PORT' 2>/dev/null; nohup scripts/join.sh --coordinator '$COORDINATOR' --label '$LABEL' --port $PORT --public-url http://127.0.0.1:$PORT $CHEAT > .state/logs/join.log 2>&1 &"
 for i in $(seq 1 60); do
-  addr=$(limactl shell "$NAME" -- bash -c "grep -o 'waiting for funding of 0x[0-9a-fA-F]*' gradewire/.state/logs/join.log 2>/dev/null | head -1 | awk '{print \$NF}'" 2>/dev/null || true)
+  addr=$(limactl shell "$NAME" -- bash -c "grep -o 'waiting for funding of 0x[0-9a-fA-F]*' ~/gradewire/.state/logs/join.log 2>/dev/null | head -1 | awk '{print \$NF}'" 2>/dev/null || true)
   [[ -n "$addr" ]] && break
-  if limactl shell "$NAME" -- bash -c "grep -q 'on-chain status' gradewire/.state/logs/join.log 2>/dev/null"; then addr="(already funded)"; break; fi
+  if limactl shell "$NAME" -- bash -c "grep -q 'on-chain status' ~/gradewire/.state/logs/join.log 2>/dev/null"; then addr="(already funded)"; break; fi
   sleep 2
 done
-say "node address: ${addr:-not printed yet; check: limactl shell $NAME -- tail gradewire/.state/logs/join.log}"
+say "node address: ${addr:-not printed yet; check: limactl shell $NAME -- tail ~/gradewire/.state/logs/join.log}"
 [[ "$addr" == 0x* ]] && say "fund it: node --env-file=.env scripts/fund-nodes.mjs --address $addr"
