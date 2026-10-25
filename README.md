@@ -84,6 +84,8 @@ scripts/trainer.sh --jobs 9                        # second workload: RL reward 
 scripts/demo-down.sh
 ```
 
+**Three nodes in VMs on this Mac:** `scripts/vm-node.sh node-a 4421 --coordinator <tunnel> --label "Node A (vm)"` (Lima; creates, provisions and starts a node in a separate Linux VM), and `scripts/demo-windows.sh` opens a small stage panel per node (letter, CPU, dollars). Runbook in `docs/DEMO.md`.
+
 **Nodes on other laptops:** `scripts/tunnel.sh 4500` on the team laptop, then on any Mac with Docker: `scripts/join.sh --coordinator https://<tunnel> --label "Node Sam"`; fund the address it prints with `scripts/fund-nodes.mjs --address 0x…`. Runbook: `docs/JOIN.md`.
 
 ### Ask it something
