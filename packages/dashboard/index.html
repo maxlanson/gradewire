@@ -80,6 +80,27 @@
   .ops i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; background: var(--line); }
   .ops i.m { background: var(--good); } .ops i.x { background: var(--critical); }
   .empty { color: var(--text-3); padding: 14px; }
+  .budget { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .brow { display: grid; grid-template-columns: minmax(130px, 1.2fr) 90px 90px minmax(150px, 2fr) auto; gap: 6px 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); align-items: center; font-variant-numeric: tabular-nums; }
+  .brow:last-child { border-bottom: 0; }
+  .brow.head { color: var(--text-3); font-size: 12px; font-weight: 500; padding: 6px 12px; }
+  .brow > * { min-width: 0; }
+  .brow .k { display: none; color: var(--text-3); font-size: 12px; margin-right: 4px; }
+  .brow .node { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brow .node .mono { margin-left: 6px; }
+  .brow .bar { display: flex; align-items: center; gap: 8px; }
+  .brow .bar .meter { flex: 1; width: auto; margin: 0; }
+  .brow .bar .meter.low b { background: var(--serious); }
+  .brow .bar span { white-space: nowrap; }
+  .brow .st { white-space: nowrap; }
+  .bmeta { color: var(--text-2); font-size: 12px; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .bmeta b { color: var(--text); font-weight: 600; }
+  @media (max-width: 700px) {
+    .brow { grid-template-columns: 1fr auto; }
+    .brow.head { display: none; }
+    .brow .node { order: 1; } .brow .st { order: 2; justify-self: end; } .brow .bar { order: 3; grid-column: 1 / -1; } .brow .cap { order: 4; } .brow .spent { order: 5; justify-self: end; }
+    .brow .k { display: inline; }
+  }
   footer { color: var(--text-3); font-size: 12px; padding: 0 24px 24px; }
 </style>
 </head>
@@ -95,6 +116,10 @@
   <section>
     <h2>Nodes</h2>
     <div class="scroll"><table><thead><tr><th>Node</th><th>Address</th><th>Status</th><th>Reliability score</th><th>Bond</th><th>Sampling</th><th>Jobs</th><th>Verified</th><th>Last seen</th></tr></thead><tbody id="providers"></tbody></table></div>
+  </section>
+  <section>
+    <h2>Agent budget</h2>
+    <div id="budget"><div class="empty">no agent has posted its spending limits yet</div></div>
   </section>
   <div class="grid2">
     <section>
@@ -114,7 +139,7 @@
 <footer>Status is shown as icon + label; node identity by the colored dot. Every transaction links to the XRPL EVM Testnet explorer.</footer>
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { providers: new Map(), jobs: new Map(), tasks: new Map(), payments: new Map(), incidents: [], feed: [], explorer: '', refundTotal: 0, deployment: {} };
+const state = { providers: new Map(), jobs: new Map(), tasks: new Map(), payments: new Map(), budgets: new Map(), incidents: [], feed: [], explorer: '', refundTotal: 0, deployment: {} };
 const colorOf = (() => { const order = []; return (addr) => { if (!addr) return 'var(--text-3)'; const a = addr.toLowerCase(); let i = order.indexOf(a); if (i < 0) { order.push(a); i = order.length - 1; } return `var(--series-${Math.min(i + 1, 5)})`; }; })();
 const label = (addr) => state.providers.get((addr || '').toLowerCase())?.label || (addr ? addr.slice(0, 6) + '…' + addr.slice(-4) : '—');
 const short = (h) => h ? h.slice(0, 8) + '…' + h.slice(-4) : '';
@@ -132,6 +157,29 @@ const ICON = {
 const status = (kind, text) => `<span class="status st-${kind}">${ICON[kind]}<span class="t">${text}</span></span>`;
 const verdictCell = (v) => v === 'pass' ? status('good', 'verified') : v === 'fail' ? status('bad', 'failed') : v === 'pending' ? status('warn', 'checking') : v === 'not_sampled' ? status('muted', 'not sampled') : status('muted', v || '—');
 const providerStatus = (p) => p.status === 'suspended' ? status('bad', 'suspended') : p.status === 'active' ? status('good', 'active') : status('warn', p.status);
+const channelStatus = (c, left, maxPrice) => c.status === 'closed' ? status('muted', 'closed') : c.status !== 'open' ? status('warn', c.status) : left < maxPrice ? status('warn', 'cap reached') : status('good', 'open');
+const fixed = (n, d = 2) => (n == null || Number.isNaN(n) ? '—' : n.toFixed(d));
+
+function renderBudgets() {
+  const budgets = [...state.budgets.values()].sort((a, b) => (b.at || 0) - (a.at || 0));
+  $('budget').innerHTML = budgets.map((b) => {
+    const maxPrice = rlusd(null, b.max_price_wei) || 0;
+    let totalCap = 0, totalSpent = 0;
+    const rows = b.channels.map((c) => {
+      const cap = rlusd(null, c.cap_wei) || 0, spent = Math.min(cap, rlusd(null, c.spent_wei) || 0), left = Math.max(0, cap - spent);
+      totalCap += cap; totalSpent += spent;
+      const frac = cap > 0 ? left / cap : 0;
+      return `<div class="brow">
+        <span class="node"><span class="dot" style="background:${colorOf(c.provider)}"></span>${c.label || label(c.provider)}${c.channel_id ? `<span class="mono" title="Channel ${c.channel_id}">${short(c.channel_id)}</span>` : ''}</span>
+        <span class="cap"><span class="k">cap</span>${fixed(cap)} RLUSD</span>
+        <span class="spent"><span class="k">spent</span>${fixed(spent)} RLUSD</span>
+        <span class="bar"><span class="meter${frac < 0.15 ? ' low' : ''}" title="${fixed(left)} of ${fixed(cap)} RLUSD remaining"><b style="width:${Math.round(frac * 100)}%"></b></span><span>${fixed(left)} left</span></span>
+        <span class="st">${channelStatus(c, left, maxPrice)}</span></div>`;
+    }).join('') || '<div class="empty">no Channels open</div>';
+    return `<div class="budget"><div class="brow head"><span>Node Channel</span><span>Cap</span><span>Spent</span><span>Remaining</span><span>Status</span></div>${rows}</div>
+      <div class="bmeta"><span>agent ${addrLink(b.agent)}</span><span>max price per job <b>${fixed(maxPrice, maxPrice >= 0.01 || maxPrice === 0 ? 2 : 4)} RLUSD</b> · min node score <b>${b.min_score || '—'}</b></span><span>spent ${fixed(totalSpent)} of ${fixed(totalCap)} RLUSD across ${b.channels.length} capped Channel${b.channels.length === 1 ? '' : 's'}</span><span>updated ${ago(b.at)}</span></div>`;
+  }).join('') || '<div class="empty">no agent has posted its spending limits yet</div>';
+}
 
 function render() {
   const providers = [...state.providers.values()];
@@ -161,6 +209,7 @@ function render() {
   }).join('') || '<tr><td colspan="5" class="empty">no verification tasks yet</td></tr>';
   $('jobs').innerHTML = jobs.slice(0, 25).map((j) => `<tr><td class="mono">${short(j.id)}</td><td><span class="dot" style="background:${colorOf(j.provider)}"></span>${label(j.provider)}</td><td>${j.reward == null ? '—' : Number(j.reward).toFixed(2)}</td><td>${rlusd(j.price_rlusd, j.price_wei) != null ? `${rlusd(j.price_rlusd, j.price_wei).toFixed(2)} RLUSD` : '—'}</td><td>${txLink(j.paid_tx, 'VoucherRedeemed')}</td><td>${verdictCell(j.verdict)} ${txLink(j.verdict_tx, 'tx')} ${j.slash_tx ? txLink(j.slash_tx, 'slash') : ''} ${j.anchor_tx ? `<a class="mono" href="https://testnet.xrpl.org/transactions/${j.anchor_tx}" target="_blank" rel="noopener">XRPL</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">no jobs yet</td></tr>';
   $('feed').innerHTML = state.feed.slice(0, 80).map((e) => `<div class="ev ${e.cls || ''}"><span class="t">${hhmmss(e.at)}</span><span class="who"><span class="dot" style="background:${colorOf(e.provider)}"></span>${e.who}</span><span class="what">${e.what}</span><span class="tx">${txLink(e.tx)}</span></div>`).join('') || '<div class="empty">waiting for events</div>';
+  renderBudgets();
 }
 
 function push(e) { state.feed.unshift(e); }
@@ -171,6 +220,7 @@ function applySnapshot(s) {
   state.providers = new Map(s.providers.map((p) => [p.address, p]));
   state.jobs = new Map(s.jobs.map((j) => [j.id, j]));
   state.payments = new Map(s.payments.map((p) => [`${p.tx}:${p.log_index}`, p]));
+  state.budgets = new Map((s.budgets || []).map((b) => [b.agent, b]));
   state.tasks = new Map();
   for (const j of s.jobs) if (j.task_id) state.tasks.set(j.task_id, { task_id: j.task_id, job_id: j.id, provider: j.provider, tx: j.task_tx, verdict_tx: j.verdict_tx, pass: j.verdict === 'pass' ? true : j.verdict === 'fail' ? false : null, responses: {} });
   for (const v of s.verifications) { const t = state.tasks.get(v.task_id); if (t) t.responses[v.operator] = { matched: !!v.matched }; }
@@ -197,6 +247,7 @@ function handle(type, d) {
   else if (type === 'slash') { state.refundTotal += Number(d.refund_rlusd); const j = state.jobs.get(d.job_id); if (j) j.slash_tx = d.tx; push({ at: d.at, provider: d.provider, who: label(d.provider), cls: 'slash', what: `bond slashed: <b>${Number(d.refund_rlusd).toFixed(3)} RLUSD refunded to the agent</b> <span class="m">· ${Number(d.verifier_reward_rlusd).toFixed(3)} to verifiers · ${Number(d.treasury_rlusd).toFixed(3)} treasury</span>`, tx: d.tx }); }
   else if (type === 'bond') { push({ at: d.at, provider: d.provider, who: label(d.provider), what: d.withdrawn ? `withdrew bond with an approver signature <span class="m">(remaining ${Number(d.total_rlusd).toFixed(2)} RLUSD)</span>` : `posted a ${Number(d.total_rlusd).toFixed(2)} RLUSD bond`, tx: d.tx }); }
   else if (type === 'anchor') { const j = state.jobs.get(d.job_id); if (j) j.anchor_tx = d.xrpl_tx; push({ at: d.at, provider: d.provider, who: 'coordinator', what: `anchored verdict #${d.task_id} on the XRP Ledger <a class="mono" href="${d.url}" target="_blank" rel="noopener">${short(d.xrpl_tx)}</a>` }); }
+  else if (type === 'budget') { state.budgets.set(d.agent, d); }
   render();
 }
 function connect() {
@@ -204,7 +255,7 @@ function connect() {
   es.onopen = () => { $('live').className = 'live'; $('live').lastElementChild.textContent = 'live'; };
   es.onerror = () => { $('live').className = 'live off'; $('live').lastElementChild.textContent = 'reconnecting'; };
   es.addEventListener('snapshot', (e) => applySnapshot(JSON.parse(e.data)));
-  for (const t of ['provider', 'payment', 'job', 'task', 'response', 'verdict', 'slash', 'bond', 'anchor']) es.addEventListener(t, (e) => handle(t, JSON.parse(e.data)));
+  for (const t of ['provider', 'payment', 'job', 'task', 'response', 'verdict', 'slash', 'bond', 'anchor', 'budget']) es.addEventListener(t, (e) => handle(t, JSON.parse(e.data)));
 }
 connect();
 setInterval(render, 5000);

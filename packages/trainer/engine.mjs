@@ -166,11 +166,34 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
   writeJson(CHANNELS_FILE, channels);
   providers = funded;
   if (!providers.length) throw new Error('no provider could be funded with a Channel');
+  // Spending limits are visible on the dashboard, not only in this terminal: the agent posts
+  // its Channel caps and spend to the coordinator. Spend is tracked locally after each payment
+  // (one RPC read per Channel here and once at the end). A failed post never affects payments.
+  const budget = new Map(); // provider address -> { cap, spent, status }
+  const channelStatus = (n) => (n === 1 ? 'open' : `status ${n}`);
+  let budgetPostFailed = false;
+  function postBudget() {
+    const body = {
+      agent: wallet.address,
+      channels: providers.map((p) => { const b = budget.get(p.address) ?? {}; return { provider: p.address, label: p.label, channel_id: p.channelId, cap_wei: String(b.cap ?? 0n), spent_wei: String(b.spent ?? 0n), status: b.status ?? 'unknown' }; }),
+      max_price_wei: maxPriceWei.toString(),
+      min_score: String(minScore),
+    };
+    return postJson(`${COORD}/agent/budget`, body).catch((e) => { if (!budgetPostFailed) { budgetPostFailed = true; log(agentTag, `budget not posted to the coordinator: ${String(e.message).slice(0, 80)}`); } });
+  }
+  async function readBudgets() {
+    for (const p of providers) {
+      try { const s = await sdk.getChannelState(provider, config.contracts.paymentLedger, p.channelId); budget.set(p.address, { cap: s.cap, spent: s.redeemed, status: budget.get(p.address)?.status === 'closed' ? 'closed' : channelStatus(s.status) }); } catch { /* keep the last known values */ }
+    }
+  }
+
   for (const p of providers) {
     const s = await sdk.getChannelState(provider, config.contracts.paymentLedger, p.channelId);
     p.channel = { cap: s.cap, redeemed: s.redeemed };
+    budget.set(p.address, { cap: s.cap, spent: s.redeemed, status: channelStatus(s.status) });
     log(agentTag, `${p.label}: channel ${short(p.channelId)} cap ${ethers.formatUnits(s.cap, 18)} spent ${ethers.formatUnits(s.redeemed, 18)} RLUSD`);
   }
+  await postBudget();
   await emit({ type: 'providers', providers: providers.map((p) => ({ ...p })) });
 
   // ── work queue and per-provider workers ──
@@ -203,6 +226,9 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
     unlinkSync(inflightFile);
     const paid = { id: item.id, job_id: job.job_id, provider: p.label, provider_address: p.address, price_wei: offer.price_wei, reward: result.reward, status: result.status, tx: purchase.transactionHash, result };
     await emit({ type: 'paid', ...paid, ms, explorer });
+    const b = budget.get(p.address);
+    if (b) b.spent += BigInt(offer.price_wei);
+    postBudget();
     return paid;
   }
 
@@ -303,9 +329,13 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         delete channels[p.address];
         writeJson(CHANNELS_FILE, channels);
         log('[closed]', `${p.label}'s Channel closed  ${explorer}/tx/${closed.tx_hash}`);
+        const b = budget.get(p.address);
+        if (b) b.status = 'closed';
         await emit({ type: 'closed', provider: p.label, tx: closed.tx_hash, explorer });
       } catch (e) { log('[close]', `${p.label}: ${e.message}`); }
     }
   }
+  await readBudgets();
+  await postBudget();
   return outcome;
 }

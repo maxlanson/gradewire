@@ -30,7 +30,7 @@ An AI agent that needs compute it can trust has one option today: a centralized 
 
 **Agentic Finance**
 - [x] Agent chooses nodes, pays and reroutes with no human in the loop (exercised with the RL trainer workload)
-- [x] Spending limits enforced: one capped AP4M Channel per node (`CHANNEL_CAP`, default 0.5 RLUSD); cap and spent are printed by the agent at the start of each run. Not shown on the dashboard.
+- [x] Spending limits enforced: one capped AP4M Channel per node (`CHANNEL_CAP`, default 0.5 RLUSD); the agent reports every Channel's cap and spend to the coordinator and the dashboard's **Agent budget** panel shows cap, spent, remaining and status per node live (`POST /agent/budget`, SSE `budget`).
 - [ ] Rehearse the ask demo 3 times (`scripts/ask.sh ... --parts 3 --no-settle`, with the cheater caught and the answer composed from verified outputs)
 - [ ] `claude` CLI logged in on the demo laptop (or `ANTHROPIC_API_KEY` set) and a `--dry-run` passes before going on stage
 - [ ] Main submission filed with repo link, demo video link, track selected
@@ -48,16 +48,19 @@ An AI agent that needs compute it can trust has one option today: a centralized 
 **Quicknode**
 - [ ] Joined the Quicknode track in the hackathon app
 - [ ] `QUICKNODE_RPC_URL` set (needs an account)
-- [x] Streams webhook implemented on the coordinator (`POST /webhooks/quicknode`, same handler as the local watcher, feeds the dashboard and scores); [ ] Stream created in the Quicknode console and exercised
+- [x] Streams webhook implemented on the coordinator (`POST /webhooks/quicknode`, same handler as the local watcher, feeds the dashboard and scores; `WATCH_CHAIN=0` makes the Stream the only event source); self-tested with real chain logs via `scripts/test-quicknode-webhook.mjs` (secret enforced, duplicates ignored, nested payloads unwrapped). Runbook: `docs/QUICKNODE.md`; tunnel: `scripts/tunnel.sh`
+- [ ] Stream created in the Quicknode console against the tunnel URL and exercised
 - [x] README explains why it matters (verdict latency gates payments)
 
 **Ledger**
 - [x] Bond withdrawal requires an approver EIP-712 signature checked on-chain; wrong signer and replay refused on testnet (software approver key)
 - [x] The agent holds capped Channel budgets, never a raw unlimited key
+- [x] Device signing implemented: `scripts/approve-withdraw.mjs --ledger` (official `@ledgerhq/hw-app-eth`, EIP-712 with hashed fallback, local verification, approver check); runbook `docs/LEDGER.md`
 - [ ] Sign the approval on a physical Ledger (needs a device); chain ID confirmed with Ledger's booth
 
 **AWS**
-- [ ] Trainer deployed on Bedrock AgentCore (scaffold in `packages/trainer/agentcore/`; needs AWS credentials)
+- [x] AgentCore runtime app updated to the ask flow (`{"question","parts"}` → paid verified compute; RL path kept) with a README for the current `agentcore` CLI; local dry run passes
+- [ ] Deployed on Bedrock AgentCore (needs AWS credentials and `ANTHROPIC_API_KEY` in the runtime; no `claude` CLI in the container)
 
 ## Honest limits to state if asked
 

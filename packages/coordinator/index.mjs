@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS payments (tx TEXT NOT NULL, log_index INTEGER NOT NUL
 CREATE TABLE IF NOT EXISTS seen_logs (key TEXT PRIMARY KEY, source TEXT NOT NULL) STRICT;
 CREATE TABLE IF NOT EXISTS telemetry (provider TEXT NOT NULL, at INTEGER NOT NULL, load REAL, graded INTEGER, uptime_s INTEGER) STRICT;
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, data TEXT NOT NULL, at INTEGER NOT NULL) STRICT;
-CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;`);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
+CREATE TABLE IF NOT EXISTS budgets (agent TEXT PRIMARY KEY, body TEXT NOT NULL, at INTEGER NOT NULL) STRICT;`);
 try { db.exec('ALTER TABLE providers ADD COLUMN first_seen INTEGER'); } catch { /* already present */ }
 try { db.exec('ALTER TABLE jobs ADD COLUMN anchor_tx TEXT'); } catch { /* already present */ }
 const q = (sql) => db.prepare(sql);
@@ -64,6 +65,8 @@ const q = (sql) => db.prepare(sql);
 const anchorer = process.env.ANCHOR_XRPL === '0' ? null : createAnchor(STATE_DIR);
 const now = () => Date.now();
 const low = (a) => String(a).toLowerCase();
+// Latest spending limits posted by each paying agent (POST /agent/budget): Channel caps and spend.
+const budgets = new Map(q('SELECT body FROM budgets').all().map((r) => { const b = JSON.parse(r.body); return [b.agent, b]; }));
 
 // ── chain ─────────────────────────────────────────────────────────────────────
 const deployment = loadDeployment();
@@ -132,8 +135,9 @@ const jobByHash = (h) => q('SELECT * FROM jobs WHERE id_hash=?').get(low(h));
 
 async function handleLog(log, source) {
   const key = `${log.transactionHash}:${Number(log.index ?? log.logIndex)}`;
-  if (q('SELECT 1 FROM seen_logs WHERE key=?').get(key)) return;
+  if (q('SELECT 1 FROM seen_logs WHERE key=?').get(key)) return false;
   q('INSERT INTO seen_logs VALUES (?,?)').run(key, source);
+  if (source === 'quicknode') console.log(`[quicknode] log ${key} from the Stream (block ${Number(log.blockNumber)})`);
   const addr = low(log.address);
   const tx = log.transactionHash;
   if (addr === low(deployment.serviceManager)) {
@@ -141,7 +145,7 @@ async function handleLog(log, source) {
     if (!ev) return;
     if (ev.name === 'NewTaskCreated') {
       const job = jobByHash(ev.args.jobId);
-      if (job) { q('UPDATE jobs SET task_id=?, task_tx=? WHERE id=?').run(Number(ev.args.taskId), tx, job.id); emit('task', { task_id: Number(ev.args.taskId), job_id: job.id, provider: job.provider, provider_hash: ev.args.providerResultHash, tx, explorer: `${EXPLORER}/tx/${tx}` }); }
+      if (job) { q('UPDATE jobs SET task_id=?, task_tx=? WHERE id=?').run(Number(ev.args.taskId), tx, job.id); emit('task', { task_id: Number(ev.args.taskId), job_id: job.id, provider: job.provider, provider_hash: ev.args.providerResultHash, tx, source, explorer: `${EXPLORER}/tx/${tx}` }); }
     } else if (ev.name === 'TaskResponded') {
       const taskId = Number(ev.args.taskId);
       q('INSERT OR IGNORE INTO verifications VALUES (?,?,?,?,?,?)').run(taskId, low(ev.args.operator), ev.args.matched ? 1 : 0, ev.args.operatorHash, tx, now());
@@ -155,7 +159,7 @@ async function handleLog(log, source) {
         q('UPDATE jobs SET verdict=?, verdict_tx=? WHERE id=?').run(pass ? 'pass' : 'fail', tx, job.id);
         q(pass ? 'UPDATE providers SET verified_ok=verified_ok+1 WHERE address=?' : 'UPDATE providers SET verified_fail=verified_fail+1, status=\'suspended\' WHERE address=?').run(job.provider);
         if (!pass) q('INSERT INTO incidents(provider,kind,detail,tx,at) VALUES (?,?,?,?,?)').run(job.provider, 'fraud', `verification of ${job.id} failed: provider hash ${job.result_hash.slice(0, 12)}… did not reproduce`, tx, now());
-        emit('verdict', { task_id: taskId, job_id: job.id, provider: job.provider, pass, tx, explorer: `${EXPLORER}/tx/${tx}` });
+        emit('verdict', { task_id: taskId, job_id: job.id, provider: job.provider, pass, tx, source, explorer: `${EXPLORER}/tx/${tx}` });
         pushProvider(job.provider);
         if (anchorer) {
           anchorer.anchor('verdict', { task_id: taskId, job_id: job.id, provider: job.provider, pass, result_hash: job.result_hash, evm_tx: tx })
@@ -178,7 +182,7 @@ async function handleLog(log, source) {
       q('UPDATE providers SET bond_wei=\'0\', status=\'suspended\' WHERE address=?').run(p);
       if (job) q('UPDATE jobs SET slash_tx=? WHERE id=?').run(tx, job.id);
       q('INSERT INTO incidents(provider,kind,detail,tx,at) VALUES (?,?,?,?,?)').run(p, 'slash', `bond slashed: ${ethers.formatUnits(ev.args.refund, 18)} RLUSD refunded to ${ev.args.buyer}, ${ethers.formatUnits(ev.args.verifierReward, 18)} to verifiers`, tx, now());
-      emit('slash', { provider: p, job_id: job?.id, buyer: ev.args.buyer, refund_rlusd: ethers.formatUnits(ev.args.refund, 18), verifier_reward_rlusd: ethers.formatUnits(ev.args.verifierReward, 18), treasury_rlusd: ethers.formatUnits(ev.args.treasuryShare, 18), tx, explorer: `${EXPLORER}/tx/${tx}` });
+      emit('slash', { provider: p, job_id: job?.id, buyer: ev.args.buyer, refund_rlusd: ethers.formatUnits(ev.args.refund, 18), verifier_reward_rlusd: ethers.formatUnits(ev.args.verifierReward, 18), treasury_rlusd: ethers.formatUnits(ev.args.treasuryShare, 18), tx, source, explorer: `${EXPLORER}/tx/${tx}` });
       pushProvider(p);
     } else if (ev.name === 'BondWithdrawn' && p) {
       await syncStatus(p);
@@ -260,7 +264,7 @@ function snapshot() {
     verified: q('SELECT count(*) n FROM jobs WHERE verdict IN (\'pass\',\'fail\')').get().n,
     caught: q('SELECT count(*) n FROM jobs WHERE verdict=\'fail\'').get().n,
   };
-  return { providers: allProviders().map(providerView), jobs, verifications, incidents, payments, totals, explorer: EXPLORER, deployment: { registry: deployment.registry, serviceManager: deployment.serviceManager, paymentLedger: deployment.paymentLedger, operators: deployment.operators }, sampling_rate: SAMPLING_RATE };
+  return { providers: allProviders().map(providerView), jobs, verifications, incidents, payments, totals, budgets: [...budgets.values()], explorer: EXPLORER, deployment: { registry: deployment.registry, serviceManager: deployment.serviceManager, paymentLedger: deployment.paymentLedger, operators: deployment.operators }, sampling_rate: SAMPLING_RATE };
 }
 
 const dashboardPath = resolve(HERE, '../dashboard/index.html');
@@ -365,6 +369,22 @@ const server = createServer(async (req, res) => {
       if (jobRoute[2] === 'spec') return send(res, 200, { job: JSON.parse(job.spec), provider_result_hash: job.result_hash, provider: job.provider });
       return send(res, 200, { job_id: job.id, verdict: job.verdict, sampled: !!job.sampled, task_id: job.task_id, verdict_tx: job.verdict_tx, slash_tx: job.slash_tx, provider: job.provider });
     }
+    if (req.method === 'POST' && path === '/agent/budget') {
+      const body = await readBody(req);
+      let agent;
+      try { agent = low(ethers.getAddress(low(body.agent))); } catch { return send(res, 400, { error: 'agent address required' }); }
+      if (!Array.isArray(body.channels)) return send(res, 400, { error: 'channels required' });
+      const wei = (v) => (/^\d+$/.test(String(v ?? '')) ? String(v) : '0');
+      const budget = {
+        agent,
+        channels: body.channels.map((c) => ({ provider: c.provider ? low(c.provider) : null, label: c.label ?? null, channel_id: c.channel_id ?? null, cap_wei: wei(c.cap_wei), spent_wei: wei(c.spent_wei), status: String(c.status ?? 'unknown') })),
+        max_price_wei: wei(body.max_price_wei), min_score: String(body.min_score ?? ''), at: now(),
+      };
+      budgets.set(agent, budget);
+      q('INSERT INTO budgets VALUES (?,?,?) ON CONFLICT(agent) DO UPDATE SET body=excluded.body, at=excluded.at').run(agent, JSON.stringify(budget), budget.at);
+      emit('budget', budget);
+      return send(res, 200, { ok: true });
+    }
     if (req.method === 'POST' && path === '/telemetry') {
       const body = await readBody(req);
       const address = low(body.provider);
@@ -376,15 +396,17 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && path === '/webhooks/quicknode') {
       if (process.env.QUICKNODE_WEBHOOK_SECRET && req.headers['x-gradewire-secret'] !== process.env.QUICKNODE_WEBHOOK_SECRET) return send(res, 401, { error: 'bad secret' });
       const body = await readBody(req);
-      // Streams "logs" payloads arrive as an array (or {data: [...]}) of raw log objects.
-      const logs = Array.isArray(body) ? body : Array.isArray(body.data) ? body.data : [];
-      let handled = 0;
-      for (const raw of logs.flat()) {
+      // Streams payloads: a flat array of raw log objects from our filter, {data: [...]} if the
+      // Stream wraps it, or the unfiltered "logs" dataset (arrays nested per block/tx).
+      const logs = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : [];
+      let handled = 0, duplicates = 0;
+      for (const raw of logs.flat(Infinity)) {
         if (!raw?.topics || !raw.address) continue;
-        await handleLog({ address: raw.address, topics: raw.topics, data: raw.data ?? '0x', transactionHash: raw.transactionHash, index: Number(raw.logIndex ?? raw.index ?? 0), blockNumber: Number(raw.blockNumber) }, 'quicknode');
-        handled++;
+        const fresh = await handleLog({ address: raw.address, topics: raw.topics, data: raw.data ?? '0x', transactionHash: raw.transactionHash, index: Number(raw.logIndex ?? raw.index ?? 0), blockNumber: Number(raw.blockNumber) }, 'quicknode');
+        if (fresh === false) duplicates++; else handled++;
       }
-      return send(res, 200, { handled });
+      console.log(`[quicknode] webhook delivery: ${handled} new, ${duplicates} already seen`);
+      return send(res, 200, { handled, duplicates });
     }
     return send(res, 404, { error: 'not_found' });
   } catch (error) {
@@ -395,5 +417,8 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[coordinator] ${wallet.address} on http://127.0.0.1:${PORT}  registry ${deployment.registry}  sm ${deployment.serviceManager}  sampling ${SAMPLING_RATE} (100% for first ${FULL_SAMPLING_UNTIL} verified jobs)`);
-  watchChain();
+  // WATCH_CHAIN=0 turns the polling watcher off so a Quicknode Stream is the only event source
+  // (otherwise the 4 s poll usually wins the race and Stream deliveries are deduplicated).
+  if (process.env.WATCH_CHAIN === '0') console.log('[coordinator] chain polling disabled (WATCH_CHAIN=0): events come from the Quicknode Stream webhook only');
+  else watchChain();
 });

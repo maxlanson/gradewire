@@ -7,3 +7,4 @@ cache/
 *-state/
 contracts/broadcast/
 contracts/cache/
+__pycache__/
