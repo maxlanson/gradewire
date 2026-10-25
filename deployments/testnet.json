@@ -1,0 +1,18 @@
+{
+  "chainId": 1449000,
+  "rpcUrl": "https://rpc.testnet.xrplevm.org",
+  "explorerUrl": "https://explorer.testnet.xrplevm.org",
+  "rlusd": "0x27b57a9D0b8d24EB97259c4E2279e45255e016f3",
+  "paymentLedger": "0xcAB42800A5ECF0D253Fa2581Bb3334B4DAEfaE91",
+  "registry": "0x8362da758e5bf63bc21f2e7bb0ec49c89879b7c3",
+  "serviceManager": "0xa85ab97518c6d118a521e8c2d7df561e5a2bb62f",
+  "deployBlock": 9226511,
+  "operators": [
+    "0xdFf549F93AeB27E061B2B1ec8B31BD7C4C4C7673",
+    "0xBFB2693a3340Ee4Df3d4293a0479b5B973b30f04",
+    "0x020061c251f5d9361b9217e5518Ee2e5e3CA7Df6"
+  ],
+  "coordinator": "0x7f3C0C5E18c6Ca605252562Eb675ACf8483ad1c7",
+  "approver": "0xbEa063b29A8b27b7A2ebd09f6C2AEFB891B9eEe8",
+  "treasury": "0x7f3C0C5E18c6Ca605252562Eb675ACf8483ad1c7"
+}

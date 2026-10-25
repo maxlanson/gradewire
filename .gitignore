@@ -5,3 +5,5 @@ out/
 cache/
 .state/
 *-state/
+contracts/broadcast/
+contracts/cache/

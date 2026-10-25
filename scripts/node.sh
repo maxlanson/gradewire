@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start a provider node. Usage: scripts/node.sh [--port 4401] [--cheat]
+# Start a provider node. Usage: scripts/node.sh [--port 4401] [--cheat] [--label "Grader A"]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; source .env; set +a

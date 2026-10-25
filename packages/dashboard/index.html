@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gradewire Live</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface: #fcfcfb; --surface-2: #f3f2ef; --line: #e4e3df;
+    --text: #0b0b0b; --text-2: #52514e; --text-3: #8a8984;
+    --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --meter-track: #cde2fb; --meter-fill: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface: #1a1a19; --surface-2: #222221; --line: #343432;
+      --text: #f0efec; --text-2: #c3c2b7; --text-3: #8f8e86;
+      --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+      --meter-track: #184f95; --meter-fill: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface: #1a1a19; --surface-2: #222221; --line: #343432;
+    --text: #f0efec; --text-2: #c3c2b7; --text-3: #8f8e86;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+    --meter-track: #184f95; --meter-fill: #3987e5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface); color: var(--text); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 18px 24px 8px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header .sub { color: var(--text-2); }
+  header .links { margin-left: auto; color: var(--text-3); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
+  a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }
+  a:hover { border-color: var(--text-2); }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; }
+  .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); display: inline-block; }
+  .live.off i { background: var(--critical); }
+  main { padding: 8px 24px 40px; display: grid; gap: 22px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface-2); border-radius: 10px; padding: 12px 14px; }
+  .tile .label { color: var(--text-2); font-size: 12px; }
+  .tile .value { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile .value small { font-size: 13px; font-weight: 500; color: var(--text-2); margin-left: 4px; }
+  .tile.hero .value { font-size: 48px; }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); margin: 0 0 8px; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; color: var(--text-3); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+  td.wrap { white-space: normal; }
+  tr:last-child td { border-bottom: 0; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; box-shadow: 0 0 0 2px var(--surface); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text-2); }
+  .status { display: inline-flex; align-items: center; gap: 5px; }
+  .status svg { width: 12px; height: 12px; }
+  .st-good { color: var(--good); } .st-warn { color: var(--warning); } .st-bad { color: var(--critical); } .st-muted { color: var(--text-3); }
+  .status .t { color: var(--text); }
+  .meter { display: inline-block; width: 72px; height: 6px; background: var(--meter-track); border-radius: 3px; vertical-align: middle; margin-right: 6px; overflow: hidden; }
+  .meter b { display: block; height: 100%; background: var(--meter-fill); border-radius: 3px; }
+  .feed { display: grid; gap: 0; max-height: 440px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+  .ev { display: grid; grid-template-columns: 58px 110px 1fr auto; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .ev:last-child { border-bottom: 0; }
+  .ev .t { color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .ev .who { font-weight: 500; }
+  .ev .what { color: var(--text); }
+  .ev .what .m { color: var(--text-2); }
+  .ev.slash { background: color-mix(in oklab, var(--critical) 8%, var(--surface)); }
+  .ev.verdict-fail .what { font-weight: 600; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } .ev { grid-template-columns: 50px 1fr; } .ev .tx { grid-column: 2; } }
+  .ops { display: inline-flex; gap: 4px; }
+  .ops i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; background: var(--line); }
+  .ops i.m { background: var(--good); } .ops i.x { background: var(--critical); }
+  .empty { color: var(--text-3); padding: 14px; }
+  footer { color: var(--text-3); font-size: 12px; padding: 0 24px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gradewire</h1>
+  <span class="sub">verified reward grading for RL · paid per grade in RLUSD via Mastercard AP4M on XRPL EVM</span>
+  <span class="live" id="live"><i></i><span>connecting</span></span>
+  <span class="links" id="links"></span>
+</header>
+<main>
+  <div class="kpis" id="kpis"></div>
+  <section>
+    <h2>Providers</h2>
+    <table><thead><tr><th>Grader</th><th>Address</th><th>Status</th><th>Reliability score</th><th>Bond</th><th>Sampling</th><th>Grades</th><th>Verified</th><th>Last seen</th></tr></thead><tbody id="providers"></tbody></table>
+  </section>
+  <div class="grid2">
+    <section>
+      <h2>Live feed</h2>
+      <div class="feed" id="feed"><div class="empty">waiting for events</div></div>
+    </section>
+    <section>
+      <h2>Verification tasks</h2>
+      <table><thead><tr><th>Task</th><th>Grader</th><th>Job</th><th>Operators</th><th>Verdict</th></tr></thead><tbody id="tasks"></tbody></table>
+    </section>
+  </div>
+  <section>
+    <h2>Recent grades</h2>
+    <table><thead><tr><th>Job</th><th>Grader</th><th>Reward</th><th>Price</th><th>Payment</th><th>Verification</th></tr></thead><tbody id="jobs"></tbody></table>
+  </section>
+</main>
+<footer>Status is shown as icon + label; grader identity by the colored dot. Every transaction links to the XRPL EVM Testnet explorer.</footer>
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { providers: new Map(), jobs: new Map(), tasks: new Map(), payments: new Map(), incidents: [], feed: [], explorer: '', refundTotal: 0, deployment: {} };
+const colorOf = (() => { const order = []; return (addr) => { if (!addr) return 'var(--text-3)'; const a = addr.toLowerCase(); let i = order.indexOf(a); if (i < 0) { order.push(a); i = order.length - 1; } return `var(--series-${Math.min(i + 1, 5)})`; }; })();
+const label = (addr) => state.providers.get((addr || '').toLowerCase())?.label || (addr ? addr.slice(0, 6) + '…' + addr.slice(-4) : '—');
+const short = (h) => h ? h.slice(0, 8) + '…' + h.slice(-4) : '';
+const txLink = (tx, text) => tx ? `<a class="mono" href="${state.explorer}/tx/${tx}" target="_blank" rel="noopener">${text || short(tx)}</a>` : '';
+const addrLink = (a) => a ? `<a class="mono" href="${state.explorer}/address/${a}" target="_blank" rel="noopener">${short(a)}</a>` : '';
+const ago = (t) => { if (!t) return '—'; const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`; };
+const hhmmss = (t) => new Date(t).toTimeString().slice(0, 8);
+const ICON = {
+  good: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="currentColor"/><path d="M3.5 6.2l1.7 1.7 3.3-3.6" stroke="#fff" stroke-width="1.4" fill="none"/></svg>',
+  bad: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="currentColor"/><path d="M4 4l4 4M8 4l-4 4" stroke="#fff" stroke-width="1.4"/></svg>',
+  warn: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="currentColor"/><circle cx="6" cy="6" r="1.6" fill="#1a1a19"/></svg>',
+  muted: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>',
+};
+const status = (kind, text) => `<span class="status st-${kind}">${ICON[kind]}<span class="t">${text}</span></span>`;
+const verdictCell = (v) => v === 'pass' ? status('good', 'verified') : v === 'fail' ? status('bad', 'failed') : v === 'pending' ? status('warn', 'checking') : v === 'not_sampled' ? status('muted', 'not sampled') : status('muted', v || '—');
+const providerStatus = (p) => p.status === 'suspended' ? status('bad', 'suspended') : p.status === 'active' ? status('good', 'active') : status('warn', p.status);
+
+function render() {
+  const providers = [...state.providers.values()];
+  const jobs = [...state.jobs.values()].sort((a, b) => b.created_at - a.created_at);
+  const payments = [...state.payments.values()];
+  const paid = payments.reduce((a, p) => a + Number(p.amount_rlusd || 0), 0);
+  const verified = jobs.filter((j) => j.verdict === 'pass' || j.verdict === 'fail').length;
+  const caught = jobs.filter((j) => j.verdict === 'fail').length;
+  $('kpis').innerHTML = [
+    ['Grades paid', jobs.length, ''],
+    ['RLUSD paid to graders', paid.toFixed(2), 'RLUSD'],
+    ['Verified on-chain', verified, `of ${jobs.filter((j) => j.sampled).length} sampled`],
+    ['Cheaters caught', caught, ''],
+    ['Refunded to trainer', state.refundTotal.toFixed(3), 'RLUSD from slashed bonds'],
+    ['Active graders', providers.filter((p) => p.status === 'active').length, `of ${providers.length}`],
+  ].map(([l, v, s]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}${s ? `<small>${s}</small>` : ''}</div></div>`).join('');
+  $('providers').innerHTML = providers.map((p) => `<tr>
+    <td><span class="dot" style="background:${colorOf(p.address)}"></span>${p.label || short(p.address)}</td>
+    <td>${addrLink(p.address)}</td><td>${providerStatus(p)}</td>
+    <td><span class="meter"><b style="width:${Math.round(p.score * 100)}%"></b></span>${p.score.toFixed(2)}</td>
+    <td>${Number(p.bond_rlusd).toFixed(2)} RLUSD</td><td>${Math.round(p.sampling_rate * 100)}%</td>
+    <td>${p.jobs_ok}</td><td>${p.verified_ok} ok${p.verified_fail ? ` · <span class="st-bad">${p.verified_fail} failed</span>` : ''}</td><td>${ago(p.last_seen)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">no providers registered</td></tr>';
+  const tasks = [...state.tasks.values()].sort((a, b) => b.task_id - a.task_id).slice(0, 30);
+  $('tasks').innerHTML = tasks.map((t) => {
+    const ops = (state.deployment.operators || []).map((o) => { const r = t.responses[o.toLowerCase()]; return `<i class="${r ? (r.matched ? 'm' : 'x') : ''}" title="${short(o)}: ${r ? (r.matched ? 'match' : 'mismatch') : 'no response yet'}"></i>`; }).join('');
+    return `<tr><td>#${t.task_id}</td><td><span class="dot" style="background:${colorOf(t.provider)}"></span>${label(t.provider)}</td><td class="mono">${short(t.job_id || '')}</td><td><span class="ops">${ops}</span></td><td>${t.pass === true ? status('good', 'pass') : t.pass === false ? status('bad', 'fail · slashed') : status('warn', 'awaiting quorum')} ${txLink(t.verdict_tx || t.tx, 'tx')}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">no verification tasks yet</td></tr>';
+  $('jobs').innerHTML = jobs.slice(0, 25).map((j) => `<tr><td class="mono">${short(j.id)}</td><td><span class="dot" style="background:${colorOf(j.provider)}"></span>${label(j.provider)}</td><td>${j.reward == null ? '—' : Number(j.reward).toFixed(2)}</td><td>${j.price_rlusd ? `${Number(j.price_rlusd).toFixed(2)} RLUSD` : '—'}</td><td>${txLink(j.paid_tx, 'VoucherRedeemed')}</td><td>${verdictCell(j.verdict)} ${txLink(j.verdict_tx, 'tx')} ${j.slash_tx ? txLink(j.slash_tx, 'slash') : ''} ${j.anchor_tx ? `<a class="mono" href="https://testnet.xrpl.org/transactions/${j.anchor_tx}" target="_blank" rel="noopener">XRPL</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">no grades yet</td></tr>';
+  $('feed').innerHTML = state.feed.slice(0, 80).map((e) => `<div class="ev ${e.cls || ''}"><span class="t">${hhmmss(e.at)}</span><span class="who"><span class="dot" style="background:${colorOf(e.provider)}"></span>${e.who}</span><span class="what">${e.what}</span><span class="tx">${txLink(e.tx)}</span></div>`).join('') || '<div class="empty">waiting for events</div>';
+}
+
+function push(e) { state.feed.unshift(e); }
+function applySnapshot(s) {
+  state.explorer = s.explorer; state.deployment = s.deployment || {};
+  state.deployment.operators = s.deployment.operators || state.deployment.operators;
+  $('links').innerHTML = `<a href="${s.explorer}/address/${s.deployment.registry}" target="_blank" rel="noopener">Registry</a><a href="${s.explorer}/address/${s.deployment.serviceManager}" target="_blank" rel="noopener">ServiceManager</a><a href="${s.explorer}/address/${s.deployment.paymentLedger}" target="_blank" rel="noopener">AP4M PaymentLedger</a><span>sampling ${Math.round(s.sampling_rate * 100)}% after 3 clean checks</span>`;
+  state.providers = new Map(s.providers.map((p) => [p.address, p]));
+  state.jobs = new Map(s.jobs.map((j) => [j.id, j]));
+  state.payments = new Map(s.payments.map((p) => [`${p.tx}:${p.log_index}`, p]));
+  state.tasks = new Map();
+  for (const j of s.jobs) if (j.task_id) state.tasks.set(j.task_id, { task_id: j.task_id, job_id: j.id, provider: j.provider, tx: j.task_tx, verdict_tx: j.verdict_tx, pass: j.verdict === 'pass' ? true : j.verdict === 'fail' ? false : null, responses: {} });
+  for (const v of s.verifications) { const t = state.tasks.get(v.task_id); if (t) t.responses[v.operator] = { matched: !!v.matched }; }
+  state.refundTotal = 0;
+  for (const i of s.incidents) if (i.kind === 'slash') { const m = i.detail.match(/([\d.]+) RLUSD refunded/); if (m) state.refundTotal += Number(m[1]); }
+  render();
+}
+function handle(type, d) {
+  if (type === 'provider') { state.providers.set(d.address, d); }
+  else if (type === 'payment') { state.payments.set(`${d.tx}:0`, d); push({ at: d.at, provider: d.provider, who: label(d.provider), what: `voucher redeemed <span class="m">${Number(d.amount_rlusd).toFixed(2)} RLUSD from the trainer${d.source === 'quicknode' ? ' · via Quicknode Stream' : ''}</span>`, tx: d.tx }); }
+  else if (type === 'job') { state.jobs.set(d.job_id, { id: d.job_id, provider: d.provider, reward: d.reward, price_rlusd: d.price_rlusd, paid_tx: d.paid_tx, sampled: d.sampled, verdict: d.verdict, created_at: d.at }); push({ at: d.at, provider: d.provider, who: label(d.provider), what: `graded <span class="mono">${short(d.job_id)}</span> reward ${Number(d.reward).toFixed(2)} <span class="m">${d.sampled ? '· sampled for verification' : '· not sampled'}</span>`, tx: d.paid_tx }); }
+  else if (type === 'task') { state.tasks.set(d.task_id, { task_id: d.task_id, job_id: d.job_id, provider: d.provider, tx: d.tx, pass: null, responses: {} }); const j = state.jobs.get(d.job_id); if (j) j.task_id = d.task_id; push({ at: d.at, provider: d.provider, who: 'coordinator', what: `opened verification task #${d.task_id} <span class="m">for ${label(d.provider)}</span>`, tx: d.tx }); }
+  else if (type === 'response') { const t = state.tasks.get(d.task_id); if (t) t.responses[d.operator.toLowerCase()] = { matched: d.matched }; push({ at: d.at, provider: d.provider, who: `verifier ${short(d.operator)}`, what: `re-ran task #${d.task_id}: <b>${d.matched ? 'hash matches' : 'hash does not match'}</b>`, tx: d.tx }); }
+  else if (type === 'verdict') { const j = state.jobs.get(d.job_id); if (j) { j.verdict = d.pass === true ? 'pass' : d.pass === false ? 'fail' : 'error'; j.verdict_tx = d.tx; } const t = state.tasks.get(d.task_id); if (t) { t.pass = d.pass; t.verdict_tx = d.tx; } push({ at: d.at, provider: d.provider, who: label(d.provider), cls: d.pass === false ? 'verdict-fail' : '', what: d.pass ? `verdict posted on-chain: <b>pass</b>` : d.pass === false ? `verdict posted on-chain: <b>FAIL</b> <span class="m">· grade did not reproduce · payments stopped</span>` : `verification error <span class="m">${d.error || ''}</span>`, tx: d.tx }); }
+  else if (type === 'slash') { state.refundTotal += Number(d.refund_rlusd); const j = state.jobs.get(d.job_id); if (j) j.slash_tx = d.tx; push({ at: d.at, provider: d.provider, who: label(d.provider), cls: 'slash', what: `bond slashed: <b>${Number(d.refund_rlusd).toFixed(3)} RLUSD refunded to the trainer</b> <span class="m">· ${Number(d.verifier_reward_rlusd).toFixed(3)} to verifiers · ${Number(d.treasury_rlusd).toFixed(3)} treasury</span>`, tx: d.tx }); }
+  else if (type === 'bond') { push({ at: d.at, provider: d.provider, who: label(d.provider), what: d.withdrawn ? `withdrew bond with an approver signature <span class="m">(remaining ${Number(d.total_rlusd).toFixed(2)} RLUSD)</span>` : `posted a ${Number(d.total_rlusd).toFixed(2)} RLUSD bond`, tx: d.tx }); }
+  else if (type === 'anchor') { const j = state.jobs.get(d.job_id); if (j) j.anchor_tx = d.xrpl_tx; push({ at: d.at, provider: d.provider, who: 'coordinator', what: `anchored verdict #${d.task_id} on the XRP Ledger <a class="mono" href="${d.url}" target="_blank" rel="noopener">${short(d.xrpl_tx)}</a>` }); }
+  render();
+}
+function connect() {
+  const es = new EventSource('/events');
+  es.onopen = () => { $('live').className = 'live'; $('live').lastElementChild.textContent = 'live'; };
+  es.onerror = () => { $('live').className = 'live off'; $('live').lastElementChild.textContent = 'reconnecting'; };
+  es.addEventListener('snapshot', (e) => applySnapshot(JSON.parse(e.data)));
+  for (const t of ['provider', 'payment', 'job', 'task', 'response', 'verdict', 'slash', 'bond', 'anchor']) es.addEventListener(t, (e) => handle(t, JSON.parse(e.data)));
+}
+connect();
+setInterval(render, 5000);
+</script>
+</body>
+</html>

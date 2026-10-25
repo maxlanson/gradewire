@@ -14,7 +14,7 @@ import {
   PARTICIPANT_LEDGER_INTERFACE, parseX402ResourceUrl, prepareX402Redemption, readPublicLogs,
   verifyMerchantResourceRedemption, verifyX402Payment,
 } from '@ap4m/sdk';
-import { readParticipantFinalizedBlock, readPaymentChannelBinding } from '@ap4m/sdk/participant-requests';
+import { readParticipantFinalizedBlock, readParticipantPaymentChannel, readPaymentChannelBinding } from '@ap4m/sdk/participant-requests';
 
 import { canonicalJson as resourceJson } from '../shared/index.mjs';
 
@@ -163,9 +163,23 @@ export function createX402Resources(config) {
         address: paymentContext.merchant.ledger, topics: [event.topicHash, channelId, claimId],
         fromBlock: retained.challenge.value.finalityBlockNumber, toBlock: safe.number,
       });
-      if (logs.length !== 1) throw new Error('redemption outcome is not confirmed');
-      transactionHash = logs[0].transactionHash;
+      if (logs.length === 1) {
+        transactionHash = logs[0].transactionHash;
+      } else if (!retained.transactionHash) {
+        // The earlier submission never left this process (nonce clash, RPC hiccup) and no
+        // redemption exists at the finalized block, so submitting now cannot double-pay.
+        const head = await provider.getBlock(await provider.getBlockNumber());
+        if (!head || now(head.timestamp) >= retained.challenge.value.validBefore - cutoffMarginSeconds) return send(response, 409, { error: 'merchant_acceptance_closed' });
+        const plan = await prepareX402Redemption(provider, paymentContext, retained.challenge.value, retained.challenge.digest, retained.header);
+        transactionHash = (await config.submitter.sendTransaction({ to: plan.transaction.to, data: plan.transaction.data, value: 0n })).hash;
+        retained.transactionHash = transactionHash;
+        db.prepare('UPDATE payments SET value=? WHERE voucher_digest=?').run(canonicalJson(retained), voucherDigest);
+        console.log(`[x402] resubmitted redemption for ${resourceUrl}: ${transactionHash}`);
+      } else {
+        throw new Error('redemption outcome is not confirmed');
+      }
     }
+    const channelNow = await readParticipantPaymentChannel(provider, context.participantRequest, channelId, await provider.getBlockNumber());
     // The SDK fetches the transaction while waiting for its receipt; a load-balanced RPC can
     // return null for a just-broadcast transaction. The payment row is already persisted, so
     // re-verifying is safe; give the chain a few seconds before handing the Agent a 503.
@@ -192,7 +206,7 @@ export function createX402Resources(config) {
       resourceContent = String(existingResource.content);
     } else {
       // Our canonical JSON, not the SDK's: grades carry decimal rewards, which the SDK rejects.
-      resourceContent = resourceJson(await resource.produce({ transactionHash, channelId }));
+      resourceContent = resourceJson(await resource.produce({ transactionHash, channelId, agent: channelNow.agent }));
       if (Buffer.byteLength(resourceContent) > 65_536) throw new Error('resource exceeds 64 KiB');
       db.prepare('INSERT INTO resource_results VALUES (?,?)').run(voucherDigest, resourceContent);
     }
