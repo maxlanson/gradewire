@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Run a Gradewire node inside a Lima VM on this Mac: a separate Linux machine with its own
 # Docker, key and node, reachable by the agent through Lima's localhost port forwarding.
-# Usage: scripts/vm-node.sh <name> <port> --coordinator https://<tunnel> [--label "Node X"] [--cheat]
-#   e.g. scripts/vm-node.sh node-a 4421 --coordinator https://...trycloudflare.com --label "Node A (vm)"
+# Usage: scripts/vm-node.sh <name> <port> [--label "Node X"] [--cheat] [--coordinator URL]
+#   e.g. scripts/vm-node.sh node-a 4421 --label "Node A (vm)"      (coordinator: http://host.lima.internal:4500)
 # Creates the VM if missing (Ubuntu + Docker, 2 CPUs, 2 GB), installs Node.js and git, clones
 # the public repo, and starts the join in the background inside the VM. Prints the node's
 # address to fund. Logs: limactl shell <name> -- tail -f ~/gradewire/.state/logs/join.log
@@ -19,7 +19,9 @@ while [[ $# -gt 0 ]]; do
     *) echo "unknown option $1" >&2; exit 1 ;;
   esac
 done
-[[ -n "$COORDINATOR" ]] || { echo "usage: scripts/vm-node.sh <name> <port> --coordinator https://<tunnel> [--label ..] [--cheat]" >&2; exit 1; }
+# Inside a Lima VM the host is host.lima.internal, so the coordinator needs no tunnel (and no DNS, and
+# no reconnects): that is the default. Pass --coordinator only to point a VM at another machine.
+COORDINATOR="${COORDINATOR:-http://host.lima.internal:4500}"
 command -v limactl >/dev/null || { echo "brew install lima" >&2; exit 1; }
 say() { printf '\033[1m[vm %s]\033[0m %s\n' "$NAME" "$*"; }
 

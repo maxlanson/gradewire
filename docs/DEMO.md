@@ -71,16 +71,14 @@ Three Lima VMs (Ubuntu, Docker, arm64 like the verifiers), each a separate machi
 brew install lima                                   # once
 scripts/demo-down.sh; rm -rf .state/coordinator; find .state/trainer -name 'inflight-*.json' -delete
 NODES="" scripts/demo-up.sh                         # coordinator + verifiers only
-scripts/tunnel.sh 4500                              # own terminal; the VMs reach the coordinator through it
-U=$(cat .state/tunnel-4500.url)
-scripts/vm-node.sh node-a 4421 --coordinator "$U" --label "Node A (vm)"            # creates + provisions the VM the first time (~5 min), then ~20 s
-scripts/vm-node.sh node-b 4422 --coordinator "$U" --label "Node B (vm)"
-scripts/vm-node.sh node-c 4423 --coordinator "$U" --label "Node C (vm)" --cheat
+scripts/vm-node.sh node-a 4421 --label "Node A (vm)"            # creates + provisions the VM the first time (~5 min), then ~20 s
+scripts/vm-node.sh node-b 4422 --label "Node B (vm)"            # the VMs reach the coordinator at host.lima.internal:4500, no tunnel needed
+scripts/vm-node.sh node-c 4423 --label "Node C (vm)" --cheat
 node --env-file=.env scripts/fund-nodes.mjs --address 0x… --address 0x… --address 0x…   # the three addresses the scripts print (first time only)
 scripts/demo-windows.sh "A http://127.0.0.1:4421 honest" "B http://127.0.0.1:4422 unreliable" "C http://127.0.0.1:4423 cheater"   # three small panel windows
 ```
 
-On stage, after the parts are dispatched and Node B (vm) shows "running" in its panel: `limactl stop node-b` (the lid closes). The agent reroutes within seconds, the dashboard flags it offline after 20 s, its panel goes red. Bring it back with `limactl start node-b && scripts/vm-node.sh node-b 4422 --coordinator "$U" --label "Node B (vm)"`.
+On stage, after the parts are dispatched and Node B (vm) shows "running" in its panel: `limactl stop node-b` (the lid closes). The agent reroutes within seconds, the dashboard flags it offline after 20 s, its panel goes red. Bring it back with `limactl start node-b && scripts/vm-node.sh node-b 4422 --label "Node B (vm)"`.
 
 After a slash the cheater's key is burned: `limactl shell node-c -- rm -rf ~/gradewire/.state/node-4423`, re-run its `vm-node.sh` line and fund the new address. A coordinator reset forgets the VM nodes; re-run the three `vm-node.sh` lines (no new funding).
 

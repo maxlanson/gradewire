@@ -74,6 +74,11 @@ export function createX402Resources(config) {
       ) STRICT;
       CREATE TABLE IF NOT EXISTS resource_results (voucher_digest TEXT PRIMARY KEY, content TEXT NOT NULL) STRICT;
       CREATE UNIQUE INDEX IF NOT EXISTS pending_channel ON payments(channel_id) WHERE complete=0;`);
+    // This process is starting, so the previous one died. A payment it retained but never submitted
+    // on-chain (no transaction hash) can only be finished by a replay of that exact Voucher, and the
+    // agent sets such Vouchers aside; left in place it would refuse every new purchase on its Channel.
+    const stale = db.prepare("UPDATE payments SET complete=1 WHERE complete=0 AND json_extract(value, '$.transactionHash') IS NULL").run();
+    if (stale.changes) console.log(`[x402] voided ${stale.changes} unsubmitted payment(s) left by the previous run; Channels are usable again`);
   } catch (error) { closeSync(lock); unlinkSync(lockPath); throw error; }
 
   let queue = Promise.resolve();

@@ -144,8 +144,8 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         // challenge expired while the node was down, can never complete: set it aside so the Channel
         // is usable again. A Voucher that was redeemed is always retried (the result is owed).
         const ageMin = (Date.now() - statSync(`${STATE_ROOT}/${dir.name}/purchase.json`).mtimeMs) / 60_000;
-        const refused = /(409|503|outcome unavailable|retained|acceptance_closed)/i.test(describeError(error));
-        if (!retained.transactionHash && refused && ageMin > 3) {
+        const refused = /(400|409|503|outcome unavailable|retained|acceptance_closed|invalid_payment)/i.test(describeError(error));
+        if (!retained.transactionHash && refused) {
           renameSync(`${STATE_ROOT}/${dir.name}`, `${STATE_ROOT}/abandoned-${dir.name}`);
           log(agentTag, `set aside stale purchase ${retained.intent.operation} (${ageMin.toFixed(0)} min old, never redeemed, node refuses it); channel ${short(channelId)} is usable again`);
           continue;
@@ -378,7 +378,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         const next = queue.shift();
         if (!next) break;
         holding.set(p.address, next.id);
-        if (next.attempts >= 3) { log(agentTag, `giving up on ${next.id} after ${next.attempts} attempts`); await emit({ type: 'giveup', id: next.id, attempts: next.attempts }); continue; }
+        if (next.attempts >= 3) { holding.delete(p.address); log(agentTag, `giving up on ${next.id} after ${next.attempts} attempts`); await emit({ type: 'giveup', id: next.id, attempts: next.attempts }); continue; }
         const job = buildJob(next);
         let offer;
         try { offer = await postJson(`${p.endpoint}/jobs`, job, {}, nodeFetch); } catch (e) { log(tag, `unreachable (${e.message}); rerouting`); paused.add(p.address); pausedWhy.set(p.address, 'unreachable'); pausedAt.set(p.address, Date.now()); requeue(next); await emit({ type: 'reroute', id: next.id, provider: p.label, reason: 'unreachable' }); break; }
@@ -434,10 +434,19 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
       if (!active.has(p.address)) launch(p);
     }
   }, 5000);
-  // Keep workers running while jobs remain: a rerouted job or a returning node may need a worker that already exited.
-  while (active.size) {
-    await Promise.race(active.values());
-    if (queue.length) for (const p of live()) if (!active.has(p.address)) launch(p);
+  // Keep workers running while jobs remain: a rerouted job or a returning node may need a worker that
+  // already exited. If work remains and the only candidates are nodes that dropped mid-run, wait up to
+  // 90 s for one of them to come back before giving the parts up.
+  const waitStart = Date.now();
+  for (;;) {
+    while (active.size) {
+      await Promise.race(active.values());
+      if (queue.length) for (const p of live()) if (!active.has(p.address)) launch(p);
+    }
+    const mayReturn = providers.some((p) => pausedWhy.get(p.address) === 'unreachable');
+    if (!queue.length || !mayReturn || Date.now() - waitStart > 90_000) break;
+    if (!active.size) log(agentTag, `${queue.length} part${queue.length === 1 ? '' : 's'} left and only a dropped node could take them; waiting for it to come back`);
+    await new Promise((r) => setTimeout(r, 3000));
   }
   clearInterval(returner);
 
