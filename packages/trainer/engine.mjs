@@ -223,6 +223,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
   const banned = new Set();
   const paused = new Set(); // not paid again this run: unreachable, stuck payment, or last job unverified
   const pausedWhy = new Map(); // address -> reason; an 'unreachable' node may rejoin once the coordinator sees it online again
+  const pausedAt = new Map(); // address -> when; a rejoin needs a heartbeat newer than this
   const events = [];
 
   async function purchaseGrade(p, item) {
@@ -306,7 +307,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
       log(tag, `trust ${next > previous ? 'up' : 'down'}: ${describeTrust(t)} (${t.clean_checks} clean check${t.clean_checks === 1 ? '' : 's'})`);
       await emit({ type: 'trust', provider: p.label, provider_address: p.address, previous_inflight: previous, ...t });
     };
-    const requeue = (r) => queue.unshift({ id: r.id, files: r.files, attempts: r.attempts });
+    const requeue = (r) => { if (!queue.some((q) => q.id === r.id)) queue.unshift({ id: r.id, files: r.files, attempts: r.attempts }); };
 
     const settleJob = async (current, paid) => {
       try {
@@ -374,7 +375,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         if (next.attempts >= 3) { log(agentTag, `giving up on ${next.id} after ${next.attempts} attempts`); await emit({ type: 'giveup', id: next.id, attempts: next.attempts }); continue; }
         const job = buildJob(next);
         let offer;
-        try { offer = await postJson(`${p.endpoint}/jobs`, job, {}, nodeFetch); } catch (e) { log(tag, `unreachable (${e.message}); rerouting`); paused.add(p.address); pausedWhy.set(p.address, 'unreachable'); queue.unshift(next); await emit({ type: 'reroute', id: next.id, provider: p.label, reason: 'unreachable' }); break; }
+        try { offer = await postJson(`${p.endpoint}/jobs`, job, {}, nodeFetch); } catch (e) { log(tag, `unreachable (${e.message}); rerouting`); paused.add(p.address); pausedWhy.set(p.address, 'unreachable'); pausedAt.set(p.address, Date.now()); requeue(next); await emit({ type: 'reroute', id: next.id, provider: p.label, reason: 'unreachable' }); break; }
         item = { job, offer, id: next.id, files: next.files, attempts: next.attempts + 1, channelId: p.channelId };
         await emit({ type: 'dispatch', id: next.id, job_id: job.job_id, provider: p.label, price_wei: offer.price_wei, attempt: item.attempts, inflight: pending.size + 1, allowed });
       }
@@ -383,8 +384,9 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         // The signed Voucher stays on disk (inflight + purchase.json) and is resumed next run.
         log(tag, `payment/grade failed: ${e.message}; rerouting the job and keeping the payment to resume later`);
         paused.add(p.address);
-        if (/unreachable/.test(String(e.message))) pausedWhy.set(p.address, 'unreachable');
-        queue.unshift({ id: item.id, files: item.files, attempts: item.attempts });
+        if (/unreachable/.test(String(e.message))) { pausedWhy.set(p.address, 'unreachable'); pausedAt.set(p.address, Date.now()); }
+        if (existsSync(inflightFile)) unlinkSync(inflightFile); // the signed Voucher, if any, lives in the purchase state and is resumed via resumeStranded
+        requeue({ id: item.id, files: item.files, attempts: item.attempts });
         await emit({ type: 'reroute', id: item.id, provider: p.label, reason: `payment/grade failed: ${e.message}` });
         break;
       }
@@ -393,7 +395,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
       if (paid.status === 'error') {
         log(tag, `sandbox fault at ${p.label} on ${current.id}: result unusable, not paying ${p.label} again this run; rerouting`);
         paused.add(p.address);
-        queue.unshift({ id: current.id, files: current.files, attempts: current.attempts });
+        requeue({ id: current.id, files: current.files, attempts: current.attempts });
         await emit({ type: 'reroute', id: current.id, provider: p.label, reason: 'sandbox fault' });
         break;
       }
@@ -416,8 +418,8 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
     let list;
     try { list = (await getJson(`${COORD}/providers?status=active&min_score=${minScore}`)).providers; } catch { return; }
     for (const p of back) {
-      const now = list.find((x) => x.address.toLowerCase() === p.address && x.online !== false);
-      if (!now) continue;
+      const now = list.find((x) => x.address.toLowerCase() === p.address && x.online !== false && Number(x.last_seen || 0) > (pausedAt.get(p.address) || 0) + 5000);
+      if (!now) continue; // no heartbeat since it dropped: still gone
       paused.delete(p.address); pausedWhy.delete(p.address);
       p.trust = now.trust; p.score = now.score;
       log(`[${p.label}]`, `back online (score ${now.score}, ${describeTrust(now.trust)}); giving it work again`);
