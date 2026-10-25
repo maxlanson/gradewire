@@ -214,7 +214,7 @@ function renderBudgets() {
       const cap = rlusd(null, c.cap_wei) || 0, spent = Math.min(cap, rlusd(null, c.spent_wei) || 0), left = Math.max(0, cap - spent);
       totalCap += cap; totalSpent += spent;
       const frac = cap > 0 ? spent / cap : 0;
-      const st = c.status === 'closed' ? status('muted', 'closed') : c.status !== 'open' ? status('warn', c.status) : left < maxPrice ? status('warn', 'cap reached') : status('good', 'open');
+      const st = c.status === 'closed' ? status('muted', 'closed') : c.status === 'stopped' ? status('bad', 'stopped, caught cheating') : c.status !== 'open' ? status('warn', c.status) : left < maxPrice ? status('warn', 'cap reached') : status('good', 'open');
       return `<div class="brow">
         <span class="node"><span class="dot" style="background:${colorOf(c.provider)}"></span>${c.label || label(c.provider)}</span>
         <span class="bar${left < maxPrice * 2 ? ' low' : ''}" title="Channel ${c.channel_id || ''}"><b style="width:${Math.round(frac * 100)}%"></b></span>

@@ -185,7 +185,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
   }
   async function readBudgets() {
     for (const p of providers) {
-      try { const s = await sdk.getChannelState(provider, config.contracts.paymentLedger, p.channelId); budget.set(p.address, { cap: s.cap, spent: s.redeemed, status: budget.get(p.address)?.status === 'closed' ? 'closed' : channelStatus(s.status) }); } catch { /* keep the last known values */ }
+      try { const s = await sdk.getChannelState(provider, config.contracts.paymentLedger, p.channelId); budget.set(p.address, { cap: s.cap, spent: s.redeemed, status: ['closed', 'stopped'].includes(budget.get(p.address)?.status) ? budget.get(p.address).status : channelStatus(s.status) }); } catch { /* keep the last known values */ }
     }
   }
 
@@ -298,6 +298,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
           log(tag, `✗ ${current.id} FAILED verification: the result did not reproduce. Stopping all payments to ${p.label}. ${explorer}/tx/${verdict.verdict_tx}`);
           banned.add(p.address);
           stop = true;
+          { const b = budget.get(p.address); if (b) b.status = 'stopped'; postBudget(); } // the dashboard shows this Channel as stopped
           events.push({ kind: 'fraud', provider: p.label, job_id: current.job.job_id, verdict_tx: verdict.verdict_tx, slash_tx: verdict.slash_tx });
           requeue(current); // re-run elsewhere
           // Results this node delivered that were never re-run are no longer trusted either.
