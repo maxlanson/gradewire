@@ -57,3 +57,96 @@ export function withdrawTypedData(deployment, chainId) {
 }
 
 export const STATUS = ['none', 'registered', 'active', 'suspended'];
+
+// ── RPC providers ─────────────────────────────────────────────────────────────
+// Quicknode's Discover plan answers eth_getLogs only for ranges of at most 5 blocks
+// (measured Oct 25 2026: toBlock - fromBlock = 5 works, 6 returns -32615). The public RPC
+// takes 2000. Every process gets its provider from makeProvider(), which splits wider
+// ranges into sequential chunks so pollers, resumes and the AP4M merchant helper's
+// VoucherRedeemed lookup all work unchanged on either endpoint.
+export function logRange(url = rpcUrl(loadDeployment())) {
+  try { if (new URL(url).hostname.endsWith('.quiknode.pro')) return 5; } catch { /* not a URL */ }
+  return 2000;
+}
+
+// Inclusive [from, to] split into [a, b] pairs with b - a <= span.
+export function splitRange(from, to, span) {
+  const out = [];
+  for (let a = from; a <= to; a += span + 1) out.push([a, Math.min(to, a + span)]);
+  return out;
+}
+
+const RATE_LIMIT_TEXT = /rate ?limit|too many requests|request limit|limit reached|credits/i;
+function rateLimited(error) {
+  const rpc = error?.info?.error;
+  if (rpc && typeof rpc === 'object' && (rpc.code === -32007 || rpc.code === -32029 || RATE_LIMIT_TEXT.test(String(rpc.message ?? '')))) return true;
+  const status = error?.info?.response?.statusCode;
+  return status === 429 || /server response 429/i.test(String(error?.message ?? ''));
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+class ChunkedLogsProvider extends ethers.JsonRpcProvider {
+  #span;
+  #limitedUntil = 0;
+  constructor(url, chainId, span) {
+    super(url, chainId, { staticNetwork: true });
+    this.#span = span;
+  }
+  async getLogs(filter) {
+    const from = toBlockNumber(filter?.fromBlock);
+    const to = toBlockNumber(filter?.toBlock);
+    if (from === undefined || to === undefined || to - from <= this.#span) return super.getLogs(filter);
+    const logs = [];
+    for (const [a, b] of splitRange(from, to, this.#span)) {
+      if (logs.length || a !== from) await sleep(120); // ~8 chunks/s leaves headroom for the other processes on the same key
+      logs.push(...await super.getLogs({ ...filter, fromBlock: a, toBlock: b }));
+    }
+    return logs;
+  }
+  // Seven processes share one Quicknode key during a demo; a burst (a catch-up after a restart,
+  // three verifiers polling at once) can trip the plan's per-second limit. Retry those with
+  // backoff instead of surfacing them as failed polls or failed transactions.
+  async _send(payload) {
+    for (let attempt = 0; ; attempt++) {
+      const wait = this.#limitedUntil - Date.now();
+      if (wait > 0) await sleep(wait);
+      let result;
+      try {
+        result = await super._send(payload);
+      } catch (error) {
+        if (!rateLimited(error) || attempt >= 6) throw error;
+        result = null;
+      }
+      if (result && !result.some((r) => r.error && rateLimited({ info: { error: r.error } }))) return result;
+      if (result && attempt >= 6) return result;
+      const backoff = Math.min(4000, 250 * 2 ** attempt) + Math.floor(Math.random() * 100);
+      this.#limitedUntil = Date.now() + backoff;
+      if (attempt === 0) console.error(`[rpc] rate limited by ${new URL(this._getConnection().url).hostname}; backing off`);
+    }
+  }
+}
+
+function toBlockNumber(tag) {
+  if (typeof tag === 'number') return tag;
+  if (typeof tag === 'bigint') return Number(tag);
+  if (typeof tag === 'string' && /^(0x[0-9a-fA-F]+|[0-9]+)$/.test(tag)) return Number(tag);
+  return undefined; // 'latest', 'safe', undefined: let ethers resolve it in one call
+}
+
+export function makeProvider(deployment = loadDeployment()) {
+  const url = rpcUrl(deployment);
+  return new ChunkedLogsProvider(url, deployment.chainId, logRange(url));
+}
+
+// Log text for an error: ethers' shortMessage plus the JSON-RPC error behind it, because
+// "could not coalesce error" on its own says nothing about what the RPC refused.
+export function describeError(error) {
+  if (!error || typeof error !== 'object') return String(error);
+  let text = error.shortMessage ?? error.message ?? String(error);
+  const rpc = error.info?.error;
+  const payload = error.info?.payload;
+  const method = Array.isArray(payload) ? payload.map((p) => p?.method).join(',') : payload?.method;
+  if (rpc && typeof rpc === 'object' && rpc.message) text += ` [rpc ${rpc.code ?? '?'}: ${String(rpc.message).slice(0, 160)}${method ? ` on ${method}` : ''}]`;
+  else if (error.info?.response?.statusCode) text += ` [http ${error.info.response.statusCode}${method ? ` on ${method}` : ''}]`;
+  return text;
+}

@@ -32,7 +32,7 @@ import { parseArgs } from 'node:util';
 import { ethers } from 'ethers';
 import { PARTICIPANT_LEDGER_INTERFACE } from '@ap4m/sdk';
 
-import { loadAbi, loadDeployment, rpcUrl } from '../packages/shared/chain.mjs';
+import { describeError, loadAbi, loadDeployment, logRange, makeProvider, rpcUrl } from '../packages/shared/chain.mjs';
 
 const { values: args } = parseArgs({ options: {
   url: { type: 'string', default: 'http://127.0.0.1:4500/webhooks/quicknode' },
@@ -53,7 +53,11 @@ const FALLBACK_TX = {
 };
 
 const deployment = loadDeployment();
-const provider = new ethers.JsonRpcProvider(rpcUrl(deployment), deployment.chainId, { staticNetwork: true });
+const provider = makeProvider(deployment);
+// Quicknode's Discover plan caps eth_getLogs at 5 blocks, so a scan over thousands of blocks
+// goes to the public RPC instead (the logs are identical; only the transport differs).
+const scanUrl = logRange(rpcUrl(deployment)) < 2000 ? (process.env.AP4M_RPC_URL || deployment.rpcUrl) : rpcUrl(deployment);
+const scanProvider = scanUrl === rpcUrl(deployment) ? provider : new ethers.JsonRpcProvider(scanUrl, deployment.chainId, { staticNetwork: true });
 const smIface = new ethers.Interface(loadAbi('GradingServiceManager'));
 const WATCHED = [deployment.serviceManager, deployment.registry, deployment.paymentLedger].map((a) => a.toLowerCase());
 const TOPIC = {
@@ -84,7 +88,7 @@ async function recentLogs(event, window) {
   // Scan backwards in 2000-block chunks (the public RPC rejects wider ranges) and stop at the first hit.
   for (let to = head; to > head - window && found.length === 0; to -= 2000) {
     const from = Math.max(deployment.deployBlock, to - 1999, head - window);
-    const logs = await provider.getLogs({ address: ADDRESS[event], topics: [TOPIC[event]], fromBlock: from, toBlock: to });
+    const logs = await scanProvider.getLogs({ address: ADDRESS[event], topics: [TOPIC[event]], fromBlock: from, toBlock: to });
     if (logs.length) found.push(logs.at(-1));
   }
   return { head, logs: found };
@@ -141,7 +145,7 @@ async function main() {
   const body = JSON.stringify(payload);
   const secret = process.env.QUICKNODE_WEBHOOK_SECRET || '';
 
-  console.log(`rpc:     ${rpcUrl(deployment)}`);
+  console.log(`rpc:     ${rpcUrl(deployment)}${scanUrl !== rpcUrl(deployment) ? `  (history scan via ${scanUrl})` : ''}`);
   console.log(`source:  ${origin}`);
   for (const l of logs) console.log(`log:     ${describe(l)}  block ${l.blockNumber}  ${l.transactionHash}:${l.index}`);
   console.log(`shape:   ${args.shape}  (${body.length} bytes)`);
@@ -157,4 +161,4 @@ async function main() {
   process.exitCode = res.ok ? 0 : 1;
 }
 
-main().catch((error) => { console.error(error.shortMessage ?? error.message ?? error); process.exit(1); });
+main().catch((error) => { console.error(describeError(error)); process.exit(1); });

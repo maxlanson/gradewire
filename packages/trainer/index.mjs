@@ -16,6 +16,7 @@ import { ethers } from 'ethers';
 import { JOB_KIND, parseJob, SANDBOX_IMAGE } from '../shared/index.mjs';
 import { ROLLOUTS } from '../../tasks/rollouts.mjs';
 import { defaultLog as log, runPaidJobs } from './engine.mjs';
+import { describeError } from '../shared/chain.mjs';
 
 const { values: args } = parseArgs({ options: {
   coordinator: { type: 'string', default: process.env.COORDINATOR_URL || 'http://127.0.0.1:4500' },
@@ -48,4 +49,4 @@ async function main() {
   });
 }
 
-main().catch((error) => { console.error(error.shortMessage ?? error.message ?? error); process.exit(1); });
+main().catch((error) => { console.error(describeError(error)); process.exit(1); });

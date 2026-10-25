@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 
 import { ethers } from 'ethers';
 
-import { contracts, hex32, loadDeployment, responseTypedData, rpcUrl } from '../shared/chain.mjs';
+import { describeError, contracts, hex32, loadDeployment, logRange, makeProvider, responseTypedData, rpcUrl } from '../shared/chain.mjs';
 import { parseJob, resultHash } from '../shared/index.mjs';
 import { runJob } from '../node/sandbox.mjs';
 
@@ -18,7 +18,7 @@ const key = process.env[`OPERATOR${args.operator}_PRIVATE_KEY`];
 if (!key) { console.error(`set OPERATOR${args.operator}_PRIVATE_KEY`); process.exit(1); }
 
 const deployment = loadDeployment();
-const provider = new ethers.JsonRpcProvider(rpcUrl(deployment));
+const provider = makeProvider(deployment); // splits getLogs ranges for Quicknode's 5-block limit
 const wallet = new ethers.Wallet(key, provider);
 const { serviceManager } = contracts(provider, deployment);
 const sm = serviceManager.connect(wallet);
@@ -55,7 +55,8 @@ async function respond(taskId, jobId, providerHash) {
 async function main() {
   console.log(`${tag} ${wallet.address} watching ${deployment.serviceManager} via ${rpcUrl(deployment)}`);
   if (!(await sm.isOperator(wallet.address))) throw new Error('this wallet is not an allowlisted operator');
-  let from = Math.max(deployment.deployBlock, (await provider.getBlockNumber()) - 2000);
+  // Look back ~2 minutes on Quicknode (4 chunked calls) and 2000 blocks on the public RPC (one call).
+  let from = Math.max(deployment.deployBlock, (await provider.getBlockNumber()) - Math.min(2000, 4 * logRange(rpcUrl(deployment))));
   // Tasks stay in `pending` until we have responded or the task is finalized, so a failed
   // attempt (RPC flake, gas race, Docker hiccup) is retried instead of lost.
   const pending = new Map(); // taskId -> { jobIdHash, providerHash, attempts, nextAt }
@@ -73,7 +74,7 @@ async function main() {
         }
         from = head + 1;
       }
-    } catch (error) { console.error(`${tag} poll: ${error.shortMessage ?? error.message}`); }
+    } catch (error) { console.error(`${tag} poll: ${describeError(error)}`); }
     for (const [taskId, t] of pending) {
       if (t.running || Date.now() < t.nextAt) continue;
       t.running = true;
@@ -84,8 +85,8 @@ async function main() {
           pending.delete(taskId); done.add(taskId);
         } catch (e) {
           t.attempts++;
-          if ((await sm.tasks(taskId).catch(() => ({ finalized: false }))).finalized || t.attempts >= 6) { pending.delete(taskId); done.add(taskId); console.log(`${tag} task ${taskId}: giving up (${t.attempts} attempts): ${e.shortMessage ?? e.message}`); }
-          else { t.nextAt = Date.now() + 5000 * t.attempts; console.error(`${tag} task ${taskId}: ${e.shortMessage ?? e.message}; retry ${t.attempts}/6`); }
+          if ((await sm.tasks(taskId).catch(() => ({ finalized: false }))).finalized || t.attempts >= 6) { pending.delete(taskId); done.add(taskId); console.log(`${tag} task ${taskId}: giving up (${t.attempts} attempts): ${describeError(e)}`); }
+          else { t.nextAt = Date.now() + 5000 * t.attempts; console.error(`${tag} task ${taskId}: ${describeError(e)}; retry ${t.attempts}/6`); }
         } finally { t.running = false; }
       })();
     }

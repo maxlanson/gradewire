@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import { ethers } from 'ethers';
 
 import { buyResource, loadX402Context } from '../ap4m/ap4m-x402.mjs';
-import { contracts, loadDeployment, rpcUrl } from '../shared/chain.mjs';
+import { describeError, contracts, loadDeployment, rpcUrl } from '../shared/chain.mjs';
 import { resultHash, resultSigningMessage, specHash } from '../shared/index.mjs';
 
 const sdk = createRequire(import.meta.url)('../ap4m/ap4m-hackathon-sdk.cjs');
@@ -29,7 +29,7 @@ export async function withRetry(label, fn, attempts = 4, log = defaultLog) {
   for (let i = 1; ; i++) {
     try { return await fn(); } catch (error) {
       if (i >= attempts) throw error;
-      log('[retry]', `${label}: ${String(error.shortMessage ?? error.message).slice(0, 90)} (attempt ${i + 1}/${attempts})`);
+      log('[retry]', `${label}: ${String(describeError(error)).slice(0, 90)} (attempt ${i + 1}/${attempts})`);
       await new Promise((r) => setTimeout(r, i * 3000));
     }
   }

@@ -99,9 +99,9 @@ Things we hit and handled (all retried, never skipped): the public RPC can retur
 
 ### Quicknode
 
-`POST /webhooks/quicknode` on the coordinator ingests a **Streams** payload of raw logs for the three contracts (`VoucherRedeemed`, `NewTaskCreated`, `TaskResponded`, `VerdictPosted`, `Slashed`) and routes it through the same handler as the local watcher, de-duplicated by `(txHash, logIndex)`; `QUICKNODE_WEBHOOK_SECRET` is checked against the `x-gradewire-secret` header. Set `QUICKNODE_RPC_URL` and every process uses the Quicknode endpoint instead of the public RPC. Why it matters here: the agent's payment gating waits on `VerdictPosted`; event latency is money latency.
+`POST /webhooks/quicknode` on the coordinator ingests a **Streams** payload of raw logs for the three contracts (`VoucherRedeemed`, `NewTaskCreated`, `TaskResponded`, `VerdictPosted`, `Slashed`) and routes it through the same handler as the local watcher, de-duplicated by `(txHash, logIndex)`; `QUICKNODE_WEBHOOK_SECRET` is checked against the `x-gradewire-secret` header. With `QUICKNODE_RPC_URL` set, every process reads and writes the chain through the Quicknode endpoint (`packages/shared/chain.mjs` → `makeProvider`), which splits `eth_getLogs` into 5-block chunks and backs off on the plan's 15 requests/second limit. Why it matters here: the agent's payment gating waits on `VerdictPosted`; event latency is money latency.
 
-**Status:** implemented but not exercised against Quicknode: the webhook and RPC switch are in the code and the dashboard tags Quicknode-sourced payments, but no Quicknode account was available, so no Stream was created and `QUICKNODE_RPC_URL` was not set. To finish: create a Stream on chain 1449000, dataset "logs", filtered to the addresses in `deployments/testnet.json`, destination `https://<tunnel>/webhooks/quicknode`, header `x-gradewire-secret`.
+**Status:** the coordinator, verifiers, nodes and agent run against a Quicknode XRPL EVM Testnet endpoint (chain 1449000 confirmed over it). The webhook is self-tested with real chain logs and the dashboard tags Quicknode-sourced payments. Still to do: create the Stream in the console (chain 1449000, dataset "logs", filtered to the addresses in `deployments/testnet.json`, destination `https://<tunnel>/webhooks/quicknode`, header `x-gradewire-secret`) and join the Quicknode track in the hackathon app; runbook in `docs/QUICKNODE.md`.
 
 ### Ledger
 
@@ -138,7 +138,7 @@ The transactions above were produced by the RL trainer workload (`python-fn-test
 
 ## What was cut
 
-Nomad (direct HTTP dispatch instead), VictoriaMetrics (SQLite telemetry table), WireGuard, real RL training (pre-generated rollouts in `tasks/`), EigenLayer core contracts (standalone AVS-pattern contracts, same events). Not exercised against the sponsor service for lack of an account or device: Quicknode Stream, physical Ledger signing, AgentCore deployment. Never cut: live AP4M payments, the verification re-run, the cheater catch.
+Nomad (direct HTTP dispatch instead), VictoriaMetrics (SQLite telemetry table), WireGuard, real RL training (pre-generated rollouts in `tasks/`), EigenLayer core contracts (standalone AVS-pattern contracts, same events). Not exercised against the sponsor service for lack of an account or device: Quicknode Stream (the RPC endpoint is live), physical Ledger signing, AgentCore deployment. Never cut: live AP4M payments, the verification re-run, the cheater catch.
 
 ## Repo map
 

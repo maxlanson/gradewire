@@ -24,7 +24,7 @@ import { parseArgs } from 'node:util';
 import { ethers } from 'ethers';
 
 import { loadX402Context } from '../ap4m/ap4m-x402.mjs';
-import { contracts, loadDeployment, rpcUrl, STATUS } from '../shared/chain.mjs';
+import { describeError, contracts, loadDeployment, makeProvider, STATUS } from '../shared/chain.mjs';
 import { buildResult, canonicalJson, parseJob, resultHash, resultSigningMessage, SANDBOX_IMAGE, SCRIPT_KIND } from '../shared/index.mjs';
 import { runJob } from './sandbox.mjs';
 import { createX402Resources, send } from './x402.mjs';
@@ -80,7 +80,7 @@ async function withRetry(label, fn, attempts = 5) {
   for (let i = 1; ; i++) {
     try { return await fn(); } catch (error) {
       if (i >= attempts) throw error;
-      console.log(`[retry] ${label}: ${String(error.shortMessage ?? error.message).slice(0, 100)} (attempt ${i + 1}/${attempts})`);
+      console.log(`[retry] ${label}: ${String(describeError(error)).slice(0, 100)} (attempt ${i + 1}/${attempts})`);
       await new Promise((r) => setTimeout(r, i * 2000));
     }
   }
@@ -95,7 +95,7 @@ async function main() {
   const identity = loadIdentity();
   const context = await loadX402Context(AP4M_API_URL);
   const deployment = loadDeployment();
-  const provider = new ethers.JsonRpcProvider(rpcUrl(deployment));
+  const provider = makeProvider(deployment); // the x402 helper's VoucherRedeemed lookup needs chunked getLogs on Quicknode
   const wallet = identity.connect(provider);
   const { registry, rlusd } = contracts(provider, deployment);
   const priceWei = ethers.parseUnits(PRICE_RLUSD, 18).toString();
@@ -223,4 +223,4 @@ async function main() {
   setInterval(beat, 5000).unref();
 }
 
-main().catch((error) => { console.error(error.shortMessage ?? error.message ?? error); process.exit(1); });
+main().catch((error) => { console.error(describeError(error)); process.exit(1); });

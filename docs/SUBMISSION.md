@@ -47,7 +47,7 @@ An AI agent that needs compute it can trust has one option today: a centralized 
 
 **Quicknode**
 - [ ] Joined the Quicknode track in the hackathon app
-- [ ] `QUICKNODE_RPC_URL` set (needs an account)
+- [x] `QUICKNODE_RPC_URL` set: XRPL EVM Testnet endpoint, chain 1449000 confirmed, all processes read the chain through it (`makeProvider` chunks `eth_getLogs` to the Discover plan's 5-block limit)
 - [x] Streams webhook implemented on the coordinator (`POST /webhooks/quicknode`, same handler as the local watcher, feeds the dashboard and scores; `WATCH_CHAIN=0` makes the Stream the only event source); self-tested with real chain logs via `scripts/test-quicknode-webhook.mjs` (secret enforced, duplicates ignored, nested payloads unwrapped). Runbook: `docs/QUICKNODE.md`; tunnel: `scripts/tunnel.sh`
 - [ ] Stream created in the Quicknode console against the tunnel URL and exercised
 - [x] README explains why it matters (verdict latency gates payments)

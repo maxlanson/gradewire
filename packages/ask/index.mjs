@@ -19,6 +19,7 @@ import { ethers } from 'ethers';
 
 import { parseJob, SANDBOX_IMAGE, SCRIPT_KIND, specHash } from '../shared/index.mjs';
 import { runPaidJobs } from '../trainer/engine.mjs';
+import { describeError } from '../shared/chain.mjs';
 
 const { values: args, positionals } = parseArgs({ allowPositionals: true, options: {
   parts: { type: 'string', default: '3' },
@@ -254,4 +255,4 @@ async function main() {
   say(`paid ${ethers.formatUnits(totalPaid, 18)} RLUSD over AP4M x402 · ${nodes.size} node${nodes.size === 1 ? '' : 's'} used · ${verifiedOnChain} job${verifiedOnChain === 1 ? '' : 's'} verified on-chain · ${outcome.banned.length} node${outcome.banned.length === 1 ? '' : 's'} caught cheating · refunds received ${ethers.formatUnits(refund, 18)} RLUSD`);
 }
 
-main().catch((error) => { console.error(error.shortMessage ?? error.message ?? error); process.exit(1); });
+main().catch((error) => { console.error(describeError(error)); process.exit(1); });

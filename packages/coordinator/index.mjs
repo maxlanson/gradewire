@@ -17,7 +17,7 @@ import { parseArgs } from 'node:util';
 import { ethers } from 'ethers';
 import { PARTICIPANT_LEDGER_INTERFACE } from '@ap4m/sdk';
 
-import { contracts, hex32, jobIdBytes, loadDeployment, rpcUrl, STATUS } from '../shared/chain.mjs';
+import { contracts, describeError, hex32, jobIdBytes, loadDeployment, makeProvider, STATUS } from '../shared/chain.mjs';
 import { canonicalJson, JOB_KIND, parseJob, resultHash, resultSigningMessage, SANDBOX_IMAGE, sha256 } from '../shared/index.mjs';
 import { runJob } from '../node/sandbox.mjs';
 import { ROLLOUTS } from '../../tasks/rollouts.mjs';
@@ -70,7 +70,7 @@ const budgets = new Map(q('SELECT body FROM budgets').all().map((r) => { const b
 
 // ── chain ─────────────────────────────────────────────────────────────────────
 const deployment = loadDeployment();
-const provider = new ethers.JsonRpcProvider(rpcUrl(deployment));
+const provider = makeProvider(deployment); // splits getLogs ranges for Quicknode's 5-block limit
 const wallet = new ethers.Wallet(process.env.COORDINATOR_PRIVATE_KEY, provider);
 const { registry, serviceManager } = contracts(provider, deployment);
 const registryW = registry.connect(wallet);
@@ -233,7 +233,7 @@ async function watchChain() {
         from = to + 1;
         q('INSERT INTO meta VALUES (\'last_block\',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(String(from));
       }
-    } catch (error) { console.error(`[watch] ${error.shortMessage ?? error.message}`); }
+    } catch (error) { console.error(`[watch] ${describeError(error)}`); }
     await new Promise((r) => setTimeout(r, 4000));
   }
 }
@@ -356,7 +356,7 @@ const server = createServer(async (req, res) => {
       if (fault) pushProvider(providerAddr);
       if (sampled) {
         sendTx(`task ${job.job_id}`, () => smW.createVerificationTask(jobIdBytes(job.job_id), providerAddr, body.buyer || wallet.address, hex32(body.result_hash)))
-          .catch((e) => { console.error(`[task] ${job.job_id}: ${e.shortMessage ?? e.message}`); q('UPDATE jobs SET verdict=\'error\' WHERE id=?').run(job.job_id); emit('verdict', { job_id: job.job_id, provider: providerAddr, pass: null, error: e.shortMessage ?? e.message }); });
+          .catch((e) => { console.error(`[task] ${job.job_id}: ${describeError(e)}`); q('UPDATE jobs SET verdict=\'error\' WHERE id=?').run(job.job_id); emit('verdict', { job_id: job.job_id, provider: providerAddr, pass: null, error: describeError(e) }); });
       }
       return send(res, 200, { sampled, verdict, sampling_rate: rate });
     }
@@ -410,8 +410,8 @@ const server = createServer(async (req, res) => {
     }
     return send(res, 404, { error: 'not_found' });
   } catch (error) {
-    console.error(`[http] ${req.method} ${path}: ${error.shortMessage ?? error.message}`);
-    return send(res, 500, { error: error.shortMessage ?? error.message });
+    console.error(`[http] ${req.method} ${path}: ${describeError(error)}`);
+    return send(res, 500, { error: describeError(error) });
   }
 });
 

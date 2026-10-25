@@ -32,18 +32,33 @@ Tick the box in `docs/SUBMISSION.md`.
 1. Quicknode console → **Endpoints** → **Create endpoint** → chain **XRPL EVM**, network
    **Testnet** (Quicknode lists XRPL EVM Mainnet and Testnet; the Streams support table confirms
    the same networks).
-2. Copy the HTTPS URL (it looks like `https://<name>.xrpl-evm-testnet.quiknode.pro/<token>/`;
-   copy it from the console rather than trusting that pattern).
+2. Copy the HTTPS URL (it looks like `https://<name>.xrplevm-testnet.quiknode.pro/<token>/`).
+   **Done Oct 25:** the team's endpoint is in `.env`; `eth_chainId` over it returns 1449000.
 3. Put it in `.env` (never committed):
 
    ```
-   QUICKNODE_RPC_URL=https://<name>.xrpl-evm-testnet.quiknode.pro/<token>/
+   QUICKNODE_RPC_URL=https://<name>.xrplevm-testnet.quiknode.pro/<token>/
    ```
 
    `packages/shared/chain.mjs` → `rpcUrl()` prefers `QUICKNODE_RPC_URL` over `AP4M_RPC_URL` and
    the public `rpcUrl` in `deployments/testnet.json`, so the coordinator, the three verifiers,
-   the nodes, the ask agent and the trainer all switch on the next restart (`scripts/demo-down.sh`
-   then `scripts/demo-up.sh`). Check with any process's startup line or with
+   the nodes, the ask agent and the trainer all switch on the next restart.
+
+   **Plan limit:** the free Discover plan answers `eth_getLogs` only for ranges of at most
+   5 blocks (`toBlock - fromBlock <= 5`; wider ranges return error -32615). `makeProvider()`
+   in `packages/shared/chain.mjs` splits wider ranges into sequential chunks, so the pollers,
+   a coordinator resume after a restart and the AP4M merchant helper's `VoucherRedeemed`
+   lookup work unchanged; `scripts/test-quicknode-webhook.mjs` scans history on the public RPC
+   for the same reason. Block time is about 7 s, so the 4 s pollers never exceed the limit
+   live. The same plan allows **15 requests per second** per endpoint (HTTP 429, body
+   `{"code":-32007,"message":"15/second request limit reached"}`); seven processes share the
+   key during a demo, so `makeProvider()` also retries rate-limited calls with backoff (ethers'
+   own fetch throttle handles the first 429s, the provider's `_send` the rest) and spaces
+   catch-up chunks ~120 ms apart. Measured: 40 simultaneous calls all succeed in 3.7 s; a
+   2000-block coordinator resume takes ~41 s (334 chunks).
+
+   Restart the stack (`scripts/demo-down.sh` then `scripts/demo-up.sh`) and check any process's
+   startup line, or run
    `node --env-file=.env scripts/test-quicknode-webhook.mjs --dry-run`, whose first line prints
    the RPC it used.
 

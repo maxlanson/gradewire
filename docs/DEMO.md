@@ -71,7 +71,8 @@ Backup if the model or the Anthropic API is unreachable: `scripts/trainer.sh --j
 
 ```bash
 scripts/demo-down.sh
-rm -rf .state/coordinator .state/node-4403 .state/trainer/inflight-*.json
+rm -rf .state/coordinator .state/node-4403
+find .state/trainer -name 'inflight-*.json' -delete   # not a glob: zsh aborts the whole rm line when no inflight file exists
 node --env-file=.env scripts/fund-nodes.mjs 4403
 ```
 
