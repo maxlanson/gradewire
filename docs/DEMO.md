@@ -41,9 +41,9 @@ scripts/ask.sh "How many primes are below 10 million, and what is the 100,000th 
 
 Narrate while it runs:
 - the agent prints the three programs Claude wrote (the model runs here on the laptop; it only writes the code) and sends each to a different node in parallel;
-- per job in the terminal: the 402 with the price, the Voucher signed locally, the redemption, 0.01 RLUSD each; click one **VoucherRedeemed** link in the Recent jobs table: the Mastercard PaymentLedger event on the explorer;
-- the **Verification tasks** panel: a job gets sampled, three verifiers re-run it, hashes match, verdict posted on-chain;
-- the Live feed line "anchored verdict": the same verdict as a memo on the native XRP Ledger (XRPL link).
+- per job in the terminal: the 402 with the price, the Voucher signed locally, the redemption, 0.01 RLUSD each; click one **tx** link in the Paid column of the Jobs panel: the Mastercard PaymentLedger event on the explorer;
+- the Jobs panel's **Checked by 3 verifiers** column: a sampled job's three squares turn green as verifiers re-run it, then "verified" with the verdict link; the same steps scroll past in the What's happening feed;
+- the feed line "anchored the verdict on the XRP Ledger": the same verdict as a memo on the native XRP Ledger (XRPL link).
 
 **1:45 The catch (50 s).** Node C returned a fabricated output without running anything. A new node's first jobs are sampled at 100 %, so its first job is checked: the verifiers' hashes do not match its result: **verdict FAIL**. In the same transaction:
 - the agent prints `✗ ... FAILED verification ... Stopping all payments to Node C` and resends that job to an honest node;
