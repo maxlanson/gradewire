@@ -45,7 +45,7 @@ Narrate while it runs:
 - the Jobs panel's **Checked by 3 verifiers** column: a sampled job's three squares turn green as verifiers re-run it, then "verified" with the verdict link; the same steps scroll past in the What's happening feed;
 - the feed line "anchored the verdict on the XRP Ledger": the same verdict as a memo on the native XRP Ledger (XRPL link).
 
-**1:45 The catch (50 s).** Node C returned a fabricated output without running anything. A new node's first jobs are sampled at 100 %, so its first job is checked: the verifiers' hashes do not match its result: **verdict FAIL**. In the same transaction:
+**1:45 The catch (50 s).** Meanwhile the honest nodes have earned trust: after their first clean check the feed says "earned trust: 2 jobs at a time" and the Trust column moves, so the agent lets them hold more work. Node C returned a fabricated output without running anything. A new node's every job is re-run, so its first job is checked: the verifiers' hashes do not match its result: **verdict FAIL**. In the same transaction:
 - the agent prints `✗ ... FAILED verification ... Stopping all payments to Node C` and resends that job to an honest node;
 - the feed line "bond slashed": 50 % refunded to the agent, 30 % to the verifiers that caught it, 20 % treasury;
 - the agent's RLUSD balance ticks up on the explorer (the refund; the agent also prints the before/after balance at the end);

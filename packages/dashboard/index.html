@@ -80,7 +80,8 @@
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
   .node { font-weight: 600; }
   .node .mono { font-weight: 400; margin-left: 8px; }
-  @media (max-width: 1400px) { td.node .mono { display: none; } }
+  @media (max-width: 1700px) { td.node .mono { display: none; } }
+  @media (max-width: 1400px) { .trust .m { display: none; } footer .note { display: none; } }
   .status { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   .status svg { width: 12px; height: 12px; }
   .st-good { color: var(--good); } .st-warn { color: var(--warn); } .st-bad { color: var(--fail); } .st-muted { color: var(--ink-3); }
@@ -92,6 +93,8 @@
   .ops i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; background: var(--track); }
   .ops i.m { background: var(--good); } .ops i.x { background: var(--fail); }
   .fail-t { color: var(--fail); font-weight: 600; }
+  .trust { white-space: nowrap; }
+  .trust .m, td .m { color: var(--ink-2); }
 
   .brow { display: grid; grid-template-columns: minmax(90px, auto) minmax(80px, 1fr) auto auto; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--rule); align-items: center; }
   .brow:last-child { border-bottom: 0; }
@@ -156,7 +159,7 @@
   <div class="col">
     <section class="panel">
       <h2>Nodes <span class="n" id="nodesn"></span></h2>
-      <div class="body"><table><thead><tr><th>Node</th><th>Status</th><th>Reliability</th><th class="r">Bond</th><th class="r">Jobs</th><th class="r">Seen</th></tr></thead><tbody id="providers"></tbody></table></div>
+      <div class="body"><table><thead><tr><th>Node</th><th>Status</th><th>Reliability</th><th>Trust earned</th><th class="r">Bond</th><th class="r">Jobs</th></tr></thead><tbody id="providers"></tbody></table></div>
     </section>
     <section class="panel">
       <h2>Agent spending caps</h2>
@@ -191,6 +194,8 @@ const ICON = {
 const status = (kind, text) => `<span class="status st-${kind}">${ICON[kind]}<span class="t">${text}</span></span>`;
 const providerStatus = (p) => p.status === 'suspended' ? status('bad', 'suspended') : p.status === 'active' ? status('good', 'active') : status('warn', p.status);
 const fixed = (n, d = 2) => (n == null || Number.isNaN(n) ? '—' : Number(n).toFixed(d));
+const describeTrust = (t) => !t ? '—' : t.max_inflight === 0 ? '<span class="fail-t">none, suspended</span>' : `<b>${t.max_inflight}</b> at a time <span class="m">· ${t.sampling_rate >= 1 ? 'all re-run' : `${Math.round(t.sampling_rate * 100)}% re-run`}</span>`;
+const trustCell = (p) => `<span class="trust">${p.status === 'active' || p.status === 'suspended' ? describeTrust(p.trust) : '<span class="m">—</span>'}</span>`;
 const opsFor = (t) => `<span class="ops">${(state.deployment.operators || []).map((o) => { const r = t?.responses?.[o.toLowerCase()]; return `<i class="${r ? (r.matched ? 'm' : 'x') : ''}" title="${verifierName(o)}: ${r ? (r.matched ? 'hash matches' : 'hash differs') : 'no response yet'}"></i>`; }).join('')}</span>`;
 
 function renderStats(jobs, paid, verified, sampled, caught) {
@@ -230,11 +235,11 @@ function render() {
   $('nodesn').textContent = `${providers.filter((p) => p.status === 'active').length} active`;
   $('providers').innerHTML = providers.map((p) => `<tr>
     <td class="node"><span class="dot" style="background:${colorOf(p.address)}"></span>${p.label || short(p.address)}${addrLink(p.address)}</td>
-    <td>${providerStatus(p)}</td>
+    <td>${providerStatus(p)}${p.status === 'active' && ago(p.last_seen) !== 'online' ? ` <span class="mono">${ago(p.last_seen)}</span>` : ''}</td>
     <td><span class="meter${p.status === 'suspended' ? ' bad' : ''}"><b style="width:${Math.round(p.score * 100)}%"></b></span>${p.score.toFixed(2)}</td>
+    <td>${trustCell(p)}</td>
     <td class="r">${Number(p.bond_rlusd).toFixed(2)}</td>
-    <td class="r">${p.jobs_ok}${p.verified_ok ? `<span class="mono"> · ${p.verified_ok} ok</span>` : ''}${p.verified_fail ? ` <span class="fail-t">· ${p.verified_fail} failed</span>` : ''}</td>
-    <td class="r mono">${ago(p.last_seen)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">No nodes registered yet.</td></tr>';
+    <td class="r">${p.jobs_ok}${p.verified_ok ? `<span class="mono"> · ${p.verified_ok} ok</span>` : ''}${p.verified_fail ? ` <span class="fail-t">· ${p.verified_fail} failed</span>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">No nodes registered yet.</td></tr>';
   $('jobsn').textContent = jobs.length ? `${jobs.length} total` : '';
   $('jobs').innerHTML = jobs.slice(0, 12).map((j) => {
     const t = j.task_id ? state.tasks.get(j.task_id) : null;
@@ -250,7 +255,7 @@ function render() {
 function push(e) { state.feed.unshift({ ...e, cls: `${e.cls || ''} new` }); }
 function applySnapshot(s) {
   state.explorer = s.explorer; state.deployment = s.deployment || {}; state.sampling = s.sampling_rate;
-  $('links').innerHTML = `<span>Contracts on XRPL EVM Testnet:</span><a href="${s.explorer}/address/${s.deployment.registry}" target="_blank" rel="noopener">Registry (bonds, slashing)</a><a href="${s.explorer}/address/${s.deployment.serviceManager}" target="_blank" rel="noopener">ServiceManager (verdicts)</a><a href="${s.explorer}/address/${s.deployment.paymentLedger}" target="_blank" rel="noopener">AP4M PaymentLedger (vouchers)</a><span>A node's first 3 verified jobs are always re-run, then ${Math.round(s.sampling_rate * 100)}% at random.</span>`;
+  $('links').innerHTML = `<span>Contracts on XRPL EVM Testnet:</span><a href="${s.explorer}/address/${s.deployment.registry}" target="_blank" rel="noopener">Registry (bonds, slashing)</a><a href="${s.explorer}/address/${s.deployment.serviceManager}" target="_blank" rel="noopener">ServiceManager (verdicts)</a><a href="${s.explorer}/address/${s.deployment.paymentLedger}" target="_blank" rel="noopener">AP4M PaymentLedger (vouchers)</a><span class="note">Trust is earned per verified job: 1 job at a time for a new node, +1 per clean check (max 3), ${Math.round(s.sampling_rate * 100)}% re-run after 3 clean checks.</span>`;
   state.providers = new Map(s.providers.map((p) => [p.address, p]));
   state.jobs = new Map(s.jobs.map((j) => [j.id, j]));
   state.payments = new Map(s.payments.map((p) => [`${p.tx}:${p.log_index}`, p]));
@@ -272,7 +277,11 @@ function applySnapshot(s) {
   render();
 }
 function handle(type, d) {
-  if (type === 'provider') { state.providers.set(d.address, d); }
+  if (type === 'provider') {
+    const prev = state.providers.get(d.address);
+    state.providers.set(d.address, d);
+    if (prev?.trust && d.trust && d.status === 'active' && d.trust.max_inflight > prev.trust.max_inflight) push({ at: d.at || Date.now(), provider: d.address, who: label(d.address), cls: 'ok', what: `earned trust: ${describeTrust(d.trust)} <span class="m">· ${d.trust.clean_checks} clean check${d.trust.clean_checks === 1 ? '' : 's'}</span>` });
+  }
   else if (type === 'payment') { state.payments.set(`${d.tx}:0`, d); push({ at: d.at, provider: d.provider, who: label(d.provider), cls: 'ok', what: `got paid ${money(d.amount_rlusd)} <span class="m">· voucher redeemed on-chain${d.source === 'quicknode' ? ' · via Quicknode Stream' : ''}</span>`, tx: d.tx }); }
   else if (type === 'job') { state.jobs.set(d.job_id, { id: d.job_id, provider: d.provider, reward: d.reward, price_rlusd: d.price_rlusd, paid_tx: d.paid_tx, sampled: d.sampled, verdict: d.verdict, created_at: d.at }); push({ at: d.at, provider: d.provider, who: label(d.provider), what: `ran <span class="mono">${short(d.job_id)}</span> <span class="m">${d.sampled ? '· picked for re-run' : '· not sampled this time'}</span>`, tx: d.paid_tx }); }
   else if (type === 'task') { state.tasks.set(d.task_id, { task_id: d.task_id, job_id: d.job_id, provider: d.provider, tx: d.tx, pass: null, responses: {} }); const j = state.jobs.get(d.job_id); if (j) j.task_id = d.task_id; push({ at: d.at, provider: d.provider, who: 'Coordinator', what: `asked 3 verifiers to re-run ${label(d.provider)}'s job`, tx: d.tx }); }

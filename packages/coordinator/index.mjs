@@ -18,6 +18,7 @@ import { ethers } from 'ethers';
 import { PARTICIPANT_LEDGER_INTERFACE } from '@ap4m/sdk';
 
 import { contracts, describeError, hex32, jobIdBytes, loadDeployment, makeProvider, STATUS } from '../shared/chain.mjs';
+import { trustOf } from '../shared/trust.mjs';
 import { canonicalJson, JOB_KIND, parseJob, resultHash, resultSigningMessage, SANDBOX_IMAGE, sha256 } from '../shared/index.mjs';
 import { runJob } from '../node/sandbox.mjs';
 import { ROLLOUTS } from '../../tasks/rollouts.mjs';
@@ -27,7 +28,9 @@ const { values: args } = parseArgs({ options: { port: { type: 'string', default:
 const PORT = Number(args.port);
 const STATE_DIR = process.env.COORDINATOR_STATE_DIR || './.state/coordinator';
 const SAMPLING_RATE = Number(process.env.SAMPLING_RATE || '0.5');
-const FULL_SAMPLING_UNTIL = Number(process.env.FULL_SAMPLING_UNTIL || '3'); // verified jobs before the rate drops
+const FULL_SAMPLING_UNTIL = Number(process.env.FULL_SAMPLING_UNTIL || '3'); // clean checks before the rate drops
+const MAX_INFLIGHT = Number(process.env.MAX_INFLIGHT || '3'); // unverified jobs a fully trusted node may hold
+const TRUST_OPTS = { samplingRate: SAMPLING_RATE, fullSamplingUntil: FULL_SAMPLING_UNTIL, maxInflight: MAX_INFLIGHT };
 const MERCHANT_ID = (process.env.MERCHANT_ID || '0xb6aa1d849d8cce69e3acad00f3e938870f0ba3677404ba389e3d2b7b910fd80e').toLowerCase();
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -105,15 +108,14 @@ function scoreOf(p) {
   const onTime = 1;
   return Math.round((0.6 * passRate + 0.3 * uptime + 0.1 * onTime) * 1000) / 1000;
 }
-function samplingRateOf(p) {
-  if (p.verified_fail > 0) return 1;
-  if (p.verified_ok + p.verified_fail < FULL_SAMPLING_UNTIL) return 1;
-  return SAMPLING_RATE;
-}
+// Trust earned per verified job: one more job in flight per clean check (up to MAX_INFLIGHT),
+// lighter sampling after FULL_SAMPLING_UNTIL clean checks, suspension on a failed check.
+const trustFor = (p) => trustOf(p, TRUST_OPTS);
+const samplingRateOf = (p) => trustFor(p).sampling_rate;
 function providerView(p) {
   return {
     address: p.address, endpoint: p.endpoint, label: p.label, price_rlusd: p.price_rlusd, status: p.status,
-    bond_rlusd: ethers.formatUnits(BigInt(p.bond_wei), 18), score: scoreOf(p), sampling_rate: samplingRateOf(p),
+    bond_rlusd: ethers.formatUnits(BigInt(p.bond_wei), 18), score: scoreOf(p), sampling_rate: samplingRateOf(p), trust: trustFor(p),
     jobs_ok: p.jobs_ok, verified_ok: p.verified_ok, verified_fail: p.verified_fail, last_seen: p.last_seen, attest_tx: p.attest_tx,
     specs: p.specs ? JSON.parse(p.specs) : null,
   };
@@ -367,7 +369,8 @@ const server = createServer(async (req, res) => {
       const job = q('SELECT * FROM jobs WHERE id=?').get(jobRoute[1]);
       if (!job) return send(res, 404, { error: 'unknown job' });
       if (jobRoute[2] === 'spec') return send(res, 200, { job: JSON.parse(job.spec), provider_result_hash: job.result_hash, provider: job.provider });
-      return send(res, 200, { job_id: job.id, verdict: job.verdict, sampled: !!job.sampled, task_id: job.task_id, verdict_tx: job.verdict_tx, slash_tx: job.slash_tx, provider: job.provider });
+      const jp = getProvider(job.provider);
+      return send(res, 200, { job_id: job.id, verdict: job.verdict, sampled: !!job.sampled, task_id: job.task_id, verdict_tx: job.verdict_tx, slash_tx: job.slash_tx, provider: job.provider, trust: jp ? trustFor(jp) : null });
     }
     if (req.method === 'POST' && path === '/agent/budget') {
       const body = await readBody(req);

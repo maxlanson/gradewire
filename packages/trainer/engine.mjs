@@ -1,9 +1,10 @@
 // Gradewire paying client, shared by the RL trainer (packages/trainer/index.mjs) and the
 // "ask" CLI (packages/ask/index.mjs). It picks providers from the coordinator by price and
 // reliability, keeps a pool of AP4M Channels (one per provider), pays per job over x402 with
-// resume-on-crash, verifies every signed result, and holds the next payment to a provider
-// until its last sampled job has a verdict. A failed verdict bans the provider and reroutes
-// its work. Optionally settles and closes Channels at the end.
+// resume-on-crash, verifies every signed result, and lets each provider hold only as many
+// unverified jobs as the trust it has earned (one for a new node, one more per clean check,
+// up to three). A failed verdict bans the provider, discards its unverified results and
+// reroutes them. Optionally settles and closes Channels at the end.
 //
 // Env: AGENT_PRIVATE_KEY, AP4M_API_URL, TEAM_NAME, CHANNEL_ID (an open Channel to reuse for
 // the first provider), CHANNEL_CAP (cap for new Channels, default 0.5), TRAINER_STATE_DIR.
@@ -14,8 +15,9 @@ import { createRequire } from 'node:module';
 import { ethers } from 'ethers';
 
 import { buyResource, loadX402Context } from '../ap4m/ap4m-x402.mjs';
-import { describeError, contracts, loadDeployment, rpcUrl } from '../shared/chain.mjs';
+import { contracts, describeError, loadDeployment, makeProvider } from '../shared/chain.mjs';
 import { resultHash, resultSigningMessage, specHash } from '../shared/index.mjs';
+import { describeTrust } from '../shared/trust.mjs';
 
 const sdk = createRequire(import.meta.url)('../ap4m/ap4m-hackathon-sdk.cjs');
 
@@ -87,7 +89,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
   mkdirSync(STATE_ROOT, { recursive: true, mode: 0o700 });
   const config = await (await fetch(`${AP4M_API_URL}/public/config`)).json();
   const deployment = loadDeployment();
-  const provider = new ethers.JsonRpcProvider(rpcUrl(deployment));
+  const provider = makeProvider(deployment); // chunked getLogs + rate-limit backoff on Quicknode
   const wallet = new ethers.Wallet(process.env.AGENT_PRIVATE_KEY, provider);
   const context = await loadX402Context(AP4M_API_URL);
   const { rlusd } = contracts(provider, deployment);
@@ -110,12 +112,12 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         const info = await getJson(`${p.endpoint}/info`);
         if (info.provider.toLowerCase() !== p.address) { log(agentTag, `skip ${p.endpoint}: identity mismatch`); continue; }
         if (BigInt(info.price_wei) > maxPriceWei) { log(agentTag, `skip ${p.label}: price ${info.price_rlusd} above max`); continue; }
-        providers.push({ address: p.address, endpoint: p.endpoint, label: p.label || info.label, price_wei: info.price_wei, score: p.score, sampling_rate: p.sampling_rate });
+        providers.push({ address: p.address, endpoint: p.endpoint, label: p.label || info.label, price_wei: info.price_wei, score: p.score, sampling_rate: p.sampling_rate, trust: p.trust });
       } catch (e) { log(agentTag, `skip ${p.endpoint}: ${e.message}`); }
     }
   }
   if (!providers.length) throw new Error('no eligible providers');
-  for (const p of providers) log(agentTag, `provider ${p.label} ${short(p.address)} score ${p.score} price ${ethers.formatUnits(p.price_wei, 18)} RLUSD sampling ${p.sampling_rate ?? '-'}`);
+  for (const p of providers) log(agentTag, `provider ${p.label} ${short(p.address)} score ${p.score} price ${ethers.formatUnits(p.price_wei, 18)} RLUSD · ${describeTrust(p.trust)}`);
 
   // ── one Channel per provider (each Channel has its own cumulative Voucher counter) ──
   const { token } = await retry('signIn', () => sdk.signIn(AP4M_API_URL, TEAM_NAME, wallet));
@@ -244,22 +246,101 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
     }
   }
 
+  // One worker per provider. Payments to a provider are sequential (its Channel has one
+  // cumulative Voucher counter), but the worker does not wait for each verdict before paying
+  // for the next job: it may hold up to `allowed` unverified jobs, where `allowed` is the
+  // trust the coordinator reports for that node (one job for a new node, one more per clean
+  // check, up to three). A failed verdict bans the node, discards its unverified results and
+  // reroutes them; an unresolved verdict pauses it for the rest of the run.
   async function worker(p) {
     const tag = `[${p.label}]`;
     const inflightFile = `${STATE_ROOT}/inflight-${p.address}.json`;
     let item = existsSync(inflightFile) ? readJson(inflightFile, null) : null;
     if (item) log(tag, `resuming unfinished purchase ${item.job.job_id}`);
+    const pending = new Map(); // job_id -> promise that resolves once its verdict is handled
+    let allowed = Math.max(1, p.trust?.max_inflight ?? 1);
+    let stop = false;
+
+    const applyTrust = async (t) => {
+      if (!t || banned.has(p.address)) return;
+      const next = Math.max(1, t.max_inflight);
+      if (next === allowed) return;
+      const previous = allowed;
+      allowed = next;
+      p.trust = t;
+      log(tag, `trust ${next > previous ? 'up' : 'down'}: ${describeTrust(t)} (${t.clean_checks} clean check${t.clean_checks === 1 ? '' : 's'})`);
+      await emit({ type: 'trust', provider: p.label, provider_address: p.address, previous_inflight: previous, ...t });
+    };
+    const requeue = (r) => queue.unshift({ id: r.id, files: r.files, attempts: r.attempts });
+
+    const settleJob = async (current, paid) => {
+      try {
+        const verdict = await awaitVerdict(p, current.job.job_id);
+        const verdictEvent = { type: 'verdict', id: current.id, job_id: current.job.job_id, provider: p.label, provider_address: p.address, verdict: verdict.verdict, task_id: verdict.task_id, verdict_tx: verdict.verdict_tx, slash_tx: verdict.slash_tx, explorer };
+        const record = { ...paid, verdict: verdict.verdict, task_id: verdict.task_id, verdict_tx: verdict.verdict_tx, files: current.files, attempts: current.attempts };
+        if (verdict.verdict === 'pass') {
+          log(tag, `✓ ${current.id} verified on-chain (task ${verdict.task_id})  ${explorer}/tx/${verdict.verdict_tx}`);
+          done.push(record);
+          await emit(verdictEvent);
+          await applyTrust(verdict.trust);
+        } else if (verdict.verdict === 'not_sampled') {
+          if (banned.has(p.address)) {
+            log(tag, `· ${current.id} was not sampled and ${p.label} has since been caught cheating: discarding it and rerouting`);
+            requeue(current);
+            await emit({ type: 'reroute', id: current.id, provider: p.label, reason: 'unverified result from a node caught cheating' });
+          } else {
+            log(tag, `· ${current.id} not sampled; result accepted`);
+            done.push(record);
+            await emit(verdictEvent);
+            await applyTrust(verdict.trust);
+          }
+        } else if (verdict.verdict === 'fail') {
+          log(tag, `✗ ${current.id} FAILED verification: the result did not reproduce. Stopping all payments to ${p.label}. ${explorer}/tx/${verdict.verdict_tx}`);
+          banned.add(p.address);
+          stop = true;
+          events.push({ kind: 'fraud', provider: p.label, job_id: current.job.job_id, verdict_tx: verdict.verdict_tx, slash_tx: verdict.slash_tx });
+          requeue(current); // re-run elsewhere
+          // Results this node delivered that were never re-run are no longer trusted either.
+          for (let i = done.length - 1; i >= 0; i--) {
+            const r = done[i];
+            if (r.provider_address !== p.address || r.verdict !== 'not_sampled') continue;
+            done.splice(i, 1);
+            requeue(r);
+            log(tag, `· discarding ${r.id}: unverified result from a node caught cheating; rerouting`);
+            await emit({ type: 'reroute', id: r.id, provider: p.label, reason: 'unverified result from a node caught cheating' });
+          }
+          await emit(verdictEvent);
+          await emit({ type: 'fraud', id: current.id, provider: p.label, provider_address: p.address, job_id: current.job.job_id, verdict_tx: verdict.verdict_tx, slash_tx: verdict.slash_tx, explorer });
+        } else {
+          // Gating rule: never pay a node while one of its sampled jobs is unverified.
+          log(tag, `? ${current.id} verdict ${verdict.verdict}: still unverified, not paying ${p.label} again this run`);
+          done.push(record);
+          paused.add(p.address);
+          stop = true;
+          await emit(verdictEvent);
+        }
+      } catch (e) {
+        log(tag, `verdict handling for ${current.id} failed: ${describeError(e)}; not paying ${p.label} again this run`);
+        paused.add(p.address);
+        stop = true;
+      } finally {
+        pending.delete(current.job.job_id);
+      }
+    };
+
     for (;;) {
+      while (pending.size >= allowed && !stop) await Promise.race(pending.values());
+      if (stop) break;
       if (!item) {
-        try { await resumeStranded(p.channelId); } catch (e) { log(tag, `an earlier payment on this channel is unresolved (${String(e.message).slice(0, 80)}); not paying it this run`); paused.add(p.address); return; }
+        try { await resumeStranded(p.channelId); } catch (e) { log(tag, `an earlier payment on this channel is unresolved (${String(e.message).slice(0, 80)}); not paying it this run`); paused.add(p.address); break; }
         const next = queue.shift();
-        if (!next) return;
+        if (!next) break;
         if (next.attempts >= 3) { log(agentTag, `giving up on ${next.id} after ${next.attempts} attempts`); await emit({ type: 'giveup', id: next.id, attempts: next.attempts }); continue; }
         const job = buildJob(next);
         let offer;
-        try { offer = await postJson(`${p.endpoint}/jobs`, job); } catch (e) { log(tag, `unreachable (${e.message}); rerouting`); paused.add(p.address); queue.unshift(next); await emit({ type: 'reroute', id: next.id, provider: p.label, reason: 'unreachable' }); return; }
+        try { offer = await postJson(`${p.endpoint}/jobs`, job); } catch (e) { log(tag, `unreachable (${e.message}); rerouting`); paused.add(p.address); queue.unshift(next); await emit({ type: 'reroute', id: next.id, provider: p.label, reason: 'unreachable' }); break; }
         item = { job, offer, id: next.id, files: next.files, attempts: next.attempts + 1, channelId: p.channelId };
-        await emit({ type: 'dispatch', id: next.id, job_id: job.job_id, provider: p.label, price_wei: offer.price_wei, attempt: item.attempts });
+        await emit({ type: 'dispatch', id: next.id, job_id: job.job_id, provider: p.label, price_wei: offer.price_wei, attempt: item.attempts, inflight: pending.size + 1, allowed });
       }
       let paid;
       try { paid = await purchaseGrade(p, item); } catch (e) {
@@ -268,39 +349,19 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         paused.add(p.address);
         queue.unshift({ id: item.id, files: item.files, attempts: item.attempts });
         await emit({ type: 'reroute', id: item.id, provider: p.label, reason: `payment/grade failed: ${e.message}` });
-        return;
+        break;
       }
       const current = item; item = null;
       if (paid.status === 'error') {
-        log(tag, `sandbox fault at ${p.label} on ${current.id}: grade unusable, not paying ${p.label} again this run; rerouting`);
+        log(tag, `sandbox fault at ${p.label} on ${current.id}: result unusable, not paying ${p.label} again this run; rerouting`);
         paused.add(p.address);
         queue.unshift({ id: current.id, files: current.files, attempts: current.attempts });
         await emit({ type: 'reroute', id: current.id, provider: p.label, reason: 'sandbox fault' });
-        return;
+        break;
       }
-      const verdict = await awaitVerdict(p, current.job.job_id);
-      const verdictEvent = { type: 'verdict', id: current.id, job_id: current.job.job_id, provider: p.label, provider_address: p.address, verdict: verdict.verdict, task_id: verdict.task_id, verdict_tx: verdict.verdict_tx, slash_tx: verdict.slash_tx, explorer };
-      if (verdict.verdict === 'pass') log(tag, `✓ ${current.id} verified on-chain (task ${verdict.task_id})  ${explorer}/tx/${verdict.verdict_tx}`);
-      else if (verdict.verdict === 'not_sampled') log(tag, `· ${current.id} not sampled; paying for the next job`);
-      else if (verdict.verdict === 'fail') {
-        log(tag, `✗ ${current.id} FAILED verification: the grade did not reproduce. Stopping all payments to ${p.label}. ${explorer}/tx/${verdict.verdict_tx}`);
-        banned.add(p.address);
-        events.push({ kind: 'fraud', provider: p.label, job_id: current.job.job_id, verdict_tx: verdict.verdict_tx, slash_tx: verdict.slash_tx });
-        queue.unshift({ id: current.id, files: current.files, attempts: current.attempts }); // re-grade elsewhere
-        await emit(verdictEvent);
-        await emit({ type: 'fraud', id: current.id, provider: p.label, provider_address: p.address, job_id: current.job.job_id, verdict_tx: verdict.verdict_tx, slash_tx: verdict.slash_tx, explorer });
-        return;
-      } else {
-        // Gating rule: never pay a grader while its last sampled job is unverified.
-        log(tag, `? ${current.id} verdict ${verdict.verdict}: last job still unverified, not paying ${p.label} again this run`);
-        done.push({ ...paid, verdict: verdict.verdict, task_id: verdict.task_id, verdict_tx: verdict.verdict_tx });
-        paused.add(p.address);
-        await emit(verdictEvent);
-        return;
-      }
-      done.push({ ...paid, verdict: verdict.verdict, task_id: verdict.task_id, verdict_tx: verdict.verdict_tx });
-      await emit(verdictEvent);
+      pending.set(current.job.job_id, settleJob(current, paid));
     }
+    await Promise.all(pending.values()); // every paid job of this node gets its verdict before the run moves on
   }
 
   const live = () => providers.filter((p) => !banned.has(p.address) && !paused.has(p.address));

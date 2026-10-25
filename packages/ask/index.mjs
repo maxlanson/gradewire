@@ -20,6 +20,7 @@ import { ethers } from 'ethers';
 import { parseJob, SANDBOX_IMAGE, SCRIPT_KIND, specHash } from '../shared/index.mjs';
 import { runPaidJobs } from '../trainer/engine.mjs';
 import { describeError } from '../shared/chain.mjs';
+import { describeTrust } from '../shared/trust.mjs';
 
 const { values: args, positionals } = parseArgs({ allowPositionals: true, options: {
   parts: { type: 'string', default: '3' },
@@ -198,10 +199,10 @@ async function main() {
       const name = (id) => `${id} "${labelOf[id] ?? id}"`;
       switch (event.type) {
         case 'providers':
-          say(`${stamp()} [nodes]    ${event.providers.map((p) => `${p.label} (score ${p.score}, ${fmt(p.price_wei)} RLUSD/job)`).join(', ')}`);
+          say(`${stamp()} [nodes]    ${event.providers.map((p) => `${p.label} (score ${p.score}, ${fmt(p.price_wei)} RLUSD/job, ${describeTrust(p.trust)})`).join(', ')}`);
           break;
         case 'dispatch':
-          say(`${stamp()} [${event.provider}] running ${name(event.id)}${event.attempt > 1 ? ` (attempt ${event.attempt})` : ''}: 402 received, paying ${fmt(event.price_wei)} RLUSD…`);
+          say(`${stamp()} [${event.provider}] running ${name(event.id)}${event.attempt > 1 ? ` (attempt ${event.attempt})` : ''}${event.allowed > 1 ? ` (${event.inflight} of ${event.allowed} in flight)` : ''}: 402 received, paying ${fmt(event.price_wei)} RLUSD…`);
           break;
         case 'paid': {
           paidEvents.push(event);
@@ -223,6 +224,9 @@ async function main() {
           break;
         case 'reroute':
           say(`${stamp()} [reroute]  ${event.id} leaves ${event.provider} (${event.reason})`);
+          break;
+        case 'trust':
+          say(`${stamp()} [${event.provider}] trust ${event.max_inflight > event.previous_inflight ? 'earned' : 'reduced'}: ${describeTrust(event)} after ${event.clean_checks} clean check${event.clean_checks === 1 ? '' : 's'}`);
           break;
         default:
       }

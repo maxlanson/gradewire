@@ -30,6 +30,7 @@ An AI agent that needs compute it can trust has one option today: a centralized 
 
 **Agentic Finance**
 - [x] Agent chooses nodes, pays and reroutes with no human in the loop (exercised with the RL trainer workload)
+- [x] Trust earned per verified job: the agent lets a node hold only as many unverified paid jobs as its clean checks allow (1 for a new node, +1 per clean check, max 3); sampling drops to 50 % after 3 clean checks; a failed check suspends the node and the agent discards and reroutes its unverified results. Shown per node on the dashboard ("Trust earned" column and feed lines)
 - [x] Spending limits enforced: one capped AP4M Channel per node (`CHANNEL_CAP`, default 0.5 RLUSD); the agent reports every Channel's cap and spend to the coordinator and the dashboard's **Agent budget** panel shows cap, spent, remaining and status per node live (`POST /agent/budget`, SSE `budget`).
 - [ ] Rehearse the ask demo 3 times (`scripts/ask.sh ... --parts 3 --no-settle`, with the cheater caught and the answer composed from verified outputs)
 - [ ] `claude` CLI logged in on the demo laptop (or `ANTHROPIC_API_KEY` set) and a `--dry-run` passes before going on stage
