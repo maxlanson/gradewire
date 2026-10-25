@@ -14,7 +14,8 @@ set -a; . .state/join-4423.env; set +a
 if [ "$mode" = stop ]; then pkill -f "server.mjs --port $k" 2>/dev/null; exit 0; fi   # k is a port here; this script's own command line never contains the pattern
 if [ "$mode" = prep ]; then port=4433; log=.state/logs/prep-$k.log; else port=4423; log=.state/logs/join.log; fi
 pkill -f "server.mjs --port $port" 2>/dev/null; sleep 0.3
-NODE_STATE_DIR=.state/node-4423-$k NODE_PUBLIC_URL=http://127.0.0.1:$port setsid nohup node packages/node/server.mjs --port $port --label "Node C (vm)" --cheat --no-display > "$log" 2>&1 < /dev/null &
+if [ "$mode" = prep ]; then label="prep C-$k"; else label="Node C (vm)"; fi   # prep rows are hidden on the dashboard
+NODE_STATE_DIR=.state/node-4423-$k NODE_PUBLIC_URL=http://127.0.0.1:$port setsid nohup node packages/node/server.mjs --port $port --label "$label" --cheat --no-display > "$log" 2>&1 < /dev/null &
 sleep 1
 LAUNCH
 chmod +x ~/gradewire/.state/cheater.sh

@@ -271,7 +271,9 @@ function renderBudgets() {
 }
 
 function render() {
-  const providers = [...state.providers.values()].sort((a, b) => String(a.label || a.address).localeCompare(String(b.label || b.address)));
+  // Identities being prepared for later demo resets register as "prep …" and are not part of the story.
+  const isPrep = (p) => /^prep\b/i.test(p?.label || '');
+  const providers = [...state.providers.values()].filter((p) => !isPrep(p)).sort((a, b) => String(a.label || a.address).localeCompare(String(b.label || b.address)));
   const jobs = [...state.jobs.values()].sort((a, b) => b.created_at - a.created_at);
   const paid = [...state.payments.values()].reduce((a, p) => a + (rlusd(p.amount_rlusd, p.amount_wei) || 0), 0);
   const verified = jobs.filter((j) => j.verdict === 'pass' || j.verdict === 'fail').length;
@@ -294,7 +296,7 @@ function render() {
     return `<tr><td class="mono">${short(j.id)}</td><td><span class="dot" style="background:${colorOf(j.provider)}"></span>${label(j.provider)}</td><td class="r">${price != null ? `${price.toFixed(2)} ${txLink(j.paid_tx, 'tx')}` : '—'}</td><td>${check} ${txLink(j.verdict_tx, 'tx')} ${j.slash_tx ? txLink(j.slash_tx, 'slash') : ''} ${j.anchor_tx ? `<a class="mono" href="https://testnet.xrpl.org/transactions/${j.anchor_tx}" target="_blank" rel="noopener">XRPL</a>` : ''}</td></tr>`;
   }).join('') || '<tr><td colspan="4" class="empty">No jobs yet.</td></tr>';
   $('feedn').textContent = state.feed.length ? `${state.feed.length} events` : '';
-  $('feed').innerHTML = state.feed.slice(0, 80).map((e) => {
+  $('feed').innerHTML = state.feed.filter((e) => !isPrep(state.providers.get((e.provider || '').toLowerCase()))).slice(0, 80).map((e) => {
     const fresh = e.fresh; e.fresh = false; // animate a line once, not on every re-render
     const who = e.sys ? `<span class="who sys"><span class="dot ring" style="--ring:${colorOf(e.provider)}"></span>${e.who}</span>` : `<span class="who"><span class="dot" style="background:${colorOf(e.provider)}"></span>${e.who}</span>`;
     return `<div class="ev ${e.cls || ''}${fresh ? ' new' : ''}"><span class="t">${hhmmss(e.at)}</span><span class="what">${who}${e.what}</span><span class="tx">${txLink(e.tx)}</span></div>`;
