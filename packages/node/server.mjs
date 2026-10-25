@@ -240,8 +240,7 @@ async function main() {
   onchain = await registry.providers(identity.address);
   if (STATUS[Number(onchain[1])] === 'suspended') throw new Error('this identity is suspended on-chain (slashed); use a new state directory');
   if (STATUS[Number(onchain[1])] === 'none') {
-    const tx = await registry.connect(wallet).register(PUBLIC_URL);
-    await tx.wait();
+    const tx = await withRetry('register on-chain', async () => { const t = await registry.connect(wallet).register(PUBLIC_URL); await t.wait(); return t; });
     console.log(`[node] registered on-chain ${tx.hash}`);
   }
   // Benchmark: run honestly even in cheat mode (a cheater passes the entry test too).
@@ -260,9 +259,10 @@ async function main() {
   if (BigInt(onchain[2]) < bondWei) {
     const need = bondWei - BigInt(onchain[2]);
     if ((await rlusd.balanceOf(identity.address)) < need) throw new Error(`need ${ethers.formatUnits(need, 18)} RLUSD for the bond: run scripts/fund-nodes.mjs`);
-    await (await rlusd.connect(wallet).approve(deployment.registry, need)).wait();
-    const tx = await registry.connect(wallet).bond(need);
-    await tx.wait();
+    // The public RPC is load-balanced and occasionally answers a transaction with an unparseable
+    // error; a node must not die at its bond step over that.
+    await withRetry('approve bond', async () => { const t = await rlusd.connect(wallet).approve(deployment.registry, need); await t.wait(); });
+    const tx = await withRetry('post bond', async () => { const t = await registry.connect(wallet).bond(need); await t.wait(); return t; });
     console.log(`[node] bonded ${ethers.formatUnits(need, 18)} RLUSD ${tx.hash}`);
   }
   onchain = await registry.providers(identity.address);
