@@ -225,6 +225,9 @@ async function main() {
         case 'reroute':
           say(`${stamp()} [reroute]  ${event.id} leaves ${event.provider} (${event.reason})`);
           break;
+        case 'return':
+          say(`${stamp()} [${event.provider}] back online with score ${event.score} and ${describeTrust(event.trust)}; the agent gives it work again`);
+          break;
         case 'trust':
           say(`${stamp()} [${event.provider}] trust ${event.max_inflight > event.previous_inflight ? 'earned' : 'reduced'}: ${describeTrust(event)} after ${event.clean_checks} clean check${event.clean_checks === 1 ? '' : 's'}`);
           break;

@@ -44,7 +44,7 @@ db.exec(`PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS providers (
   address TEXT PRIMARY KEY, endpoint TEXT, specs TEXT, price_rlusd TEXT, status TEXT NOT NULL DEFAULT 'registered',
   bond_wei TEXT NOT NULL DEFAULT '0', benchmark_hash TEXT, attest_tx TEXT, jobs_ok INTEGER NOT NULL DEFAULT 0,
-  verified_ok INTEGER NOT NULL DEFAULT 0, verified_fail INTEGER NOT NULL DEFAULT 0, heartbeats INTEGER NOT NULL DEFAULT 0,
+  verified_ok INTEGER NOT NULL DEFAULT 0, verified_fail INTEGER NOT NULL DEFAULT 0, heartbeats INTEGER NOT NULL DEFAULT 0, trust_penalty INTEGER NOT NULL DEFAULT 0,
   registered_at INTEGER NOT NULL, last_seen INTEGER, label TEXT
 ) STRICT;
 CREATE TABLE IF NOT EXISTS benchmarks (provider TEXT PRIMARY KEY, challenge TEXT NOT NULL, expected TEXT NOT NULL, issued_at INTEGER NOT NULL) STRICT;
@@ -252,12 +252,13 @@ setInterval(() => {
     const quiet = now() - p.last_seen;
     if (quiet >= OFFLINE_AFTER_MS && !offline.has(p.address)) {
       offline.add(p.address);
-      q('INSERT INTO incidents(provider,kind,detail,at) VALUES (?,?,?,?)').run(p.address, 'health', `went offline: no heartbeat for ${Math.round(quiet / 1000)} s; its jobs are rerouted, reliability drops, no slash`, now());
+      q('UPDATE providers SET trust_penalty=verified_ok WHERE address=?').run(p.address); // earned trust restarts: one job at a time, every one re-run
+      q('INSERT INTO incidents(provider,kind,detail,at) VALUES (?,?,?,?)').run(p.address, 'health', `went offline: no heartbeat for ${Math.round(quiet / 1000)} s; its jobs are rerouted, reliability drops, trust resets to one job at a time, no slash`, now());
       emit('health', { provider: p.address, online: false, quiet_s: Math.round(quiet / 1000) });
       pushProvider(p.address);
     } else if (quiet < OFFLINE_AFTER_MS && offline.has(p.address)) {
       offline.delete(p.address);
-      q('INSERT INTO incidents(provider,kind,detail,at) VALUES (?,?,?,?)').run(p.address, 'health', 'back online', now());
+      q('INSERT INTO incidents(provider,kind,detail,at) VALUES (?,?,?,?)').run(p.address, 'health', 'back online: one job at a time, every one re-run, until 3 clean checks', now());
       emit('health', { provider: p.address, online: true });
       pushProvider(p.address);
     }

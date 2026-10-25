@@ -208,6 +208,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
   const done = [];
   const banned = new Set();
   const paused = new Set(); // not paid again this run: unreachable, stuck payment, or last job unverified
+  const pausedWhy = new Map(); // address -> reason; an 'unreachable' node may rejoin once the coordinator sees it online again
   const events = [];
 
   async function purchaseGrade(p, item) {
@@ -359,7 +360,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         if (next.attempts >= 3) { log(agentTag, `giving up on ${next.id} after ${next.attempts} attempts`); await emit({ type: 'giveup', id: next.id, attempts: next.attempts }); continue; }
         const job = buildJob(next);
         let offer;
-        try { offer = await postJson(`${p.endpoint}/jobs`, job, {}, nodeFetch); } catch (e) { log(tag, `unreachable (${e.message}); rerouting`); paused.add(p.address); queue.unshift(next); await emit({ type: 'reroute', id: next.id, provider: p.label, reason: 'unreachable' }); break; }
+        try { offer = await postJson(`${p.endpoint}/jobs`, job, {}, nodeFetch); } catch (e) { log(tag, `unreachable (${e.message}); rerouting`); paused.add(p.address); pausedWhy.set(p.address, 'unreachable'); queue.unshift(next); await emit({ type: 'reroute', id: next.id, provider: p.label, reason: 'unreachable' }); break; }
         item = { job, offer, id: next.id, files: next.files, attempts: next.attempts + 1, channelId: p.channelId };
         await emit({ type: 'dispatch', id: next.id, job_id: job.job_id, provider: p.label, price_wei: offer.price_wei, attempt: item.attempts, inflight: pending.size + 1, allowed });
       }
@@ -368,6 +369,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         // The signed Voucher stays on disk (inflight + purchase.json) and is resumed next run.
         log(tag, `payment/grade failed: ${e.message}; rerouting the job and keeping the payment to resume later`);
         paused.add(p.address);
+        if (/unreachable/.test(String(e.message))) pausedWhy.set(p.address, 'unreachable');
         queue.unshift({ id: item.id, files: item.files, attempts: item.attempts });
         await emit({ type: 'reroute', id: item.id, provider: p.label, reason: `payment/grade failed: ${e.message}` });
         break;
@@ -387,9 +389,34 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
   }
 
   const live = () => providers.filter((p) => !banned.has(p.address) && !paused.has(p.address));
-  await Promise.all(providers.map(worker));
-  // Rerouted work: while jobs remain and some grader is still payable, run those graders again.
-  while (queue.length && live().length) await Promise.all(live().map(worker));
+  const active = new Map(); // address -> running worker promise
+  const launch = (p) => { const pr = worker(p).catch((e) => log(`[${p.label}]`, `worker failed: ${describeError(e)}`)).finally(() => active.delete(p.address)); active.set(p.address, pr); };
+  for (const p of live()) launch(p);
+  // A node that went unreachable mid-run (laptop closed, VM stopped) is paused, not banned. While
+  // work remains, ask the coordinator every 5 s whether it is back online; if so, let it rejoin
+  // with whatever trust it has left (the coordinator restarts its clean streak: one job at a time).
+  const returner = setInterval(async () => {
+    if (!queue.length) return;
+    const back = providers.filter((p) => pausedWhy.get(p.address) === 'unreachable');
+    if (!back.length) return;
+    let list;
+    try { list = (await getJson(`${COORD}/providers?status=active&min_score=${minScore}`)).providers; } catch { return; }
+    for (const p of back) {
+      const now = list.find((x) => x.address.toLowerCase() === p.address && x.online !== false);
+      if (!now) continue;
+      paused.delete(p.address); pausedWhy.delete(p.address);
+      p.trust = now.trust; p.score = now.score;
+      log(`[${p.label}]`, `back online (score ${now.score}, ${describeTrust(now.trust)}); giving it work again`);
+      await emit({ type: 'return', provider: p.label, provider_address: p.address, score: now.score, trust: now.trust });
+      if (!active.has(p.address)) launch(p);
+    }
+  }, 5000);
+  // Keep workers running while jobs remain: a rerouted job or a returning node may need a worker that already exited.
+  while (active.size) {
+    await Promise.race(active.values());
+    if (queue.length) for (const p of live()) if (!active.has(p.address)) launch(p);
+  }
+  clearInterval(returner);
 
   const endBalance = await rlusd.balanceOf(wallet.address);
   const outcome = { results: done, unassigned: queue, events, providers, banned: [...banned], startBalance, endBalance, explorer, settlements: [] };

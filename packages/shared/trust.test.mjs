@@ -30,3 +30,10 @@ test('a failed check means suspension; a past failure on an active node means pr
   assert.equal(describeTrust(t(5, 1, 'suspended')), 'suspended');
   assert.deepEqual(t(5, 1), { clean_checks: 5, failed_checks: 1, level: 'probation', max_inflight: 1, sampling_rate: 1 });
 });
+
+test('going offline restarts the clean streak', () => {
+  const p = { verified_ok: 5, verified_fail: 0, status: 'active', trust_penalty: 5 };
+  assert.equal(trustOf(p).max_inflight, 1);
+  assert.equal(trustOf(p).sampling_rate, 1);
+  assert.equal(trustOf({ ...p, verified_ok: 7 }).max_inflight, 3);
+});
