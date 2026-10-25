@@ -39,6 +39,7 @@ export function createAnchor(stateDir) {
       // (a self-payment is rejected by the ledger as temREDUNDANT).
       const tx = await client.autofill({
         TransactionType: 'AccountSet', Account: wallet.classicAddress,
+        SourceTag: Number(process.env.XRPL_SOURCE_TAG || 20261025), // identifies Gradewire's transactions on the ledger (set XRPL_SOURCE_TAG if the organisers assign one)
         Memos: [{ Memo: { MemoType: convertStringToHex('gradewire/verdict'), MemoData: convertStringToHex(memo), MemoFormat: convertStringToHex('application/json') } }],
       });
       const result = await client.submitAndWait(wallet.sign(tx).tx_blob);
