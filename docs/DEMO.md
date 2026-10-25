@@ -52,6 +52,8 @@ node --env-file=.env scripts/fund-nodes.mjs --address 0x<their address>
 scripts/ask.sh "How many primes are below 10 million, and what is the 100,000th prime?" --parts 3 --dry-run
 ```
 
+**Three teammate laptops, no local nodes:** `NODES="" scripts/demo-up.sh` starts only the coordinator and verifiers; one teammate joins with `--cheat` (they are slashed on stage and must `rm -rf .state/node-4411` and re-join before the next run), one closes the lid, one stays honest. Joined laptops use the public RPC, not the Quicknode key, so they add no rate-limit load.
+
 On stage, run the same question with `--parts 3` (one part per node). Cue the teammate to close the lid when the dashboard's feed shows their node "ran …" or their panel says "running"; the window is the 15-25 s a job takes. After the run, their laptop reopened shows "back online" in the feed.
 
 Gotchas:
