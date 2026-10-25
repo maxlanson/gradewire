@@ -1,0 +1,12 @@
+{
+  "name": "gradewire",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "@ap4m/sdk": "https://hackathon.ap4m.build/sdk/ap4m-sdk.tgz",
+    "ethers": "6.17.0"
+  }
+}
