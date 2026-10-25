@@ -49,7 +49,20 @@ echo "provisioned: node $(node --version), docker $(docker version --format '{{.
 VM
 
 say "starting the node (port $PORT is forwarded to this Mac's 127.0.0.1:$PORT)…"
-limactl shell "$NAME" -- bash -c "cd ~/gradewire && pkill -f 'server.mjs --port $PORT' 2>/dev/null; nohup scripts/join.sh --coordinator '$COORDINATOR' --label '$LABEL' --port $PORT --public-url http://127.0.0.1:$PORT $CHEAT > .state/logs/join.log 2>&1 &"
+# A launcher file inside the VM (limactl shell mangles long quoted commands); setsid + no stdin
+# so the node outlives the shell session that starts it.
+limactl shell "$NAME" -- bash -s <<VM
+cat > ~/gradewire/.state/start-node.sh <<'START'
+#!/usr/bin/env bash
+cd ~/gradewire
+pkill -f 'server.mjs --port $PORT' 2>/dev/null
+sleep 1
+(setsid nohup scripts/join.sh --coordinator '$COORDINATOR' --label '$LABEL' --port $PORT --public-url http://127.0.0.1:$PORT $CHEAT > .state/logs/join.log 2>&1 < /dev/null &)
+sleep 2
+START
+chmod +x ~/gradewire/.state/start-node.sh
+VM
+limactl shell "$NAME" -- bash -c '"$HOME/gradewire/.state/start-node.sh"'   # ~ must expand in the guest, not here
 for i in $(seq 1 60); do
   addr=$(limactl shell "$NAME" -- bash -c "grep -o 'waiting for funding of 0x[0-9a-fA-F]*' ~/gradewire/.state/logs/join.log 2>/dev/null | head -1 | awk '{print \$NF}'" 2>/dev/null || true)
   [[ -n "$addr" ]] && break

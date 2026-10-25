@@ -45,6 +45,22 @@ const PUBLIC_URL = (process.env.NODE_PUBLIC_URL || `http://127.0.0.1:${PORT}`).r
 const VERSION = '0.2.0';
 const startedAt = Date.now();
 
+// Whole-machine CPU use, sampled every 2 s from os.cpus() deltas, for /health and the panels.
+let cpuPct = 0;
+let lastCpu = os.cpus().map((c) => c.times);
+setInterval(() => {
+  const now = os.cpus().map((c) => c.times);
+  let busy = 0, total = 0;
+  for (let i = 0; i < now.length; i++) {
+    const a = lastCpu[i] || now[i], b = now[i];
+    const idle = b.idle - a.idle;
+    const all = (b.user - a.user) + (b.nice - a.nice) + (b.sys - a.sys) + (b.irq - a.irq) + idle;
+    busy += all - idle; total += all;
+  }
+  cpuPct = total > 0 ? Math.round((busy / total) * 100) : 0;
+  lastCpu = now;
+}, 2000).unref();
+
 // The node's identity key signs results, submits redemptions and holds the bond.
 function loadIdentity() {
   mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
@@ -153,7 +169,7 @@ async function main() {
 
   const server = createServer({ maxHeaderSize: 16_384 }, (req, res) => {
     const url = new URL(req.url, PUBLIC_URL);
-    if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true, running, graded, jobs_known: countJobs(), uptime_s: Math.floor((Date.now() - startedAt) / 1000) });
+    if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true, running, graded, jobs_known: countJobs(), uptime_s: Math.floor((Date.now() - startedAt) / 1000), cpu_pct: cpuPct, cores: os.cpus().length, loadavg: os.loadavg()[0], label: LABEL, provider: identity.address, cheat: CHEAT });
     if (req.method === 'GET' && url.pathname === '/info') {
       return send(res, 200, { provider: identity.address, label: LABEL, price_rlusd: PRICE_RLUSD, price_wei: priceWei, payout: PAYOUT, merchant_id: MERCHANT_ID, image: SANDBOX_IMAGE, version: VERSION, endpoint: PUBLIC_URL, specs: specs() });
     }
