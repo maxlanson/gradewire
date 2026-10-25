@@ -321,6 +321,20 @@ const server = createServer(async (req, res) => {
       list.sort((a, b) => (Number(a.price_rlusd) / Math.max(a.score, 1e-6)) - (Number(b.price_rlusd) / Math.max(b.score, 1e-6)));
       return send(res, 200, { providers: list });
     }
+    // New demo session: forget every job, payment, verdict and incident, drop providers that are
+    // gone (suspended or silent) and restart the counters of the ones still here, so the dashboard
+    // starts empty while the nodes keep running. Nodes are not restarted; their trust restarts at
+    // "new" (one job at a time). Local only (the coordinator listens on loopback and the VM bridge).
+    if (req.method === 'POST' && path === '/admin/reset') {
+      for (const t of ['jobs', 'verifications', 'incidents', 'payments', 'events', 'budgets', 'benchmarks', 'telemetry']) q(`DELETE FROM ${t}`).run();
+      const gone = q('SELECT address, label, status FROM providers WHERE status=\'suspended\' OR last_seen IS NULL OR last_seen < ?').all(now() - OFFLINE_AFTER_MS);
+      for (const g of gone) q('DELETE FROM providers WHERE address=?').run(g.address);
+      q('UPDATE providers SET jobs_ok=0, verified_ok=0, verified_fail=0, trust_penalty=0, heartbeats=1, first_seen=?, registered_at=?').run(now(), now());
+      budgets.clear(); offline.clear();
+      console.log(`[coordinator] session reset: ${gone.length} provider(s) dropped (${gone.map((g) => `${g.label}: ${g.status}`).join(', ') || 'none'}), counters restarted for ${allProviders().length}`);
+      emit('reset', { dropped: gone.map((g) => g.label), kept: allProviders().map((p) => p.label) });
+      return send(res, 200, { ok: true, dropped: gone.map((g) => g.label), kept: allProviders().map((p) => p.label) });
+    }
     if (req.method === 'POST' && path === '/providers/register') {
       const body = await readBody(req);
       const address = ethers.getAddress(body.address);
@@ -329,6 +343,13 @@ const server = createServer(async (req, res) => {
       if (existing?.status === 'suspended') return send(res, 403, { error: 'provider is suspended' });
       if (!existing) q('INSERT INTO providers(address,endpoint,specs,price_rlusd,label,registered_at) VALUES (?,?,?,?,?,?)').run(low(address), body.endpoint, JSON.stringify(body.specs ?? {}), String(body.price_rlusd ?? ''), body.label ?? null, now());
       else q('UPDATE providers SET endpoint=?, specs=?, price_rlusd=?, label=COALESCE(?, label) WHERE address=?').run(body.endpoint, JSON.stringify(body.specs ?? {}), String(body.price_rlusd ?? ''), body.label ?? null, low(address));
+      // An identity that is already attested and bonded on-chain (it passed a benchmark before, e.g. a
+      // cheater identity prepared ahead of a demo) is active at once: no challenge, no new attest tx.
+      await syncStatus(address);
+      if (getProvider(address)?.status === 'active') {
+        pushProvider(address);
+        return send(res, 200, { provider: low(address), challenge: null, registry: deployment.registry, rlusd: deployment.rlusd });
+      }
       // Benchmark challenge: three jobs with answers the coordinator computes itself.
       const challenge = benchmarkJobs();
       const expected = {};

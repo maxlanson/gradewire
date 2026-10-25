@@ -243,18 +243,22 @@ async function main() {
     const tx = await withRetry('register on-chain', async () => { const t = await registry.connect(wallet).register(PUBLIC_URL); await t.wait(); return t; });
     console.log(`[node] registered on-chain ${tx.hash}`);
   }
-  // Benchmark: run honestly even in cheat mode (a cheater passes the entry test too).
-  const t0 = Date.now();
-  const results = [];
-  for (const spec of reg.challenge.jobs) {
-    const job = parseJob(spec);
-    const hash = resultHash(await runJob(job));
-    results.push({ job_id: job.job_id, result_hash: hash, sig: await identity.signMessage(resultSigningMessage(job.job_id, hash)) });
+  if (reg.challenge) {
+    // Benchmark: run honestly even in cheat mode (a cheater passes the entry test too).
+    const t0 = Date.now();
+    const results = [];
+    for (const spec of reg.challenge.jobs) {
+      const job = parseJob(spec);
+      const hash = resultHash(await runJob(job));
+      results.push({ job_id: job.job_id, result_hash: hash, sig: await identity.signMessage(resultSigningMessage(job.job_id, hash)) });
+    }
+    display.event('status', { status: 'benchmark' });
+    const bench = await withRetry('benchmark', () => postJson(`${COORDINATOR_URL}/providers/${identity.address}/benchmark`, { results }));
+    if (!bench.pass) throw new Error('benchmark failed');
+    console.log(`[node] benchmark passed in ${Date.now() - t0}ms, attested ${bench.attest_tx}`);
+  } else {
+    console.log('[node] already attested and bonded on-chain; the coordinator skipped the benchmark');
   }
-  display.event('status', { status: 'benchmark' });
-  const bench = await withRetry('benchmark', () => postJson(`${COORDINATOR_URL}/providers/${identity.address}/benchmark`, { results }));
-  if (!bench.pass) throw new Error('benchmark failed');
-  console.log(`[node] benchmark passed in ${Date.now() - t0}ms, attested ${bench.attest_tx}`);
   onchain = await registry.providers(identity.address);
   if (BigInt(onchain[2]) < bondWei) {
     const need = bondWei - BigInt(onchain[2]);

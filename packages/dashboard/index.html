@@ -350,6 +350,7 @@ function connect() {
   es.onopen = () => { $('live').className = 'live'; $('live').lastElementChild.textContent = 'live'; };
   es.onerror = () => { $('live').className = 'live off'; $('live').lastElementChild.textContent = 'reconnecting'; };
   es.addEventListener('snapshot', (e) => applySnapshot(JSON.parse(e.data)));
+  es.addEventListener('reset', () => location.reload()); // a new demo session: start from the fresh snapshot
   for (const t of ['provider', 'payment', 'job', 'task', 'response', 'verdict', 'slash', 'bond', 'anchor', 'budget', 'health']) es.addEventListener(t, (e) => handle(t, JSON.parse(e.data)));
 }
 connect();
