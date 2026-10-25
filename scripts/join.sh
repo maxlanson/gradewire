@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-COORDINATOR=""; LABEL="Node $(scutil --get ComputerName 2>/dev/null || hostname -s)"; PORT=4411; PRICE="0.01"; CHEAT=""
+COORDINATOR=""; LABEL="Node $(scutil --get ComputerName 2>/dev/null || hostname -s)"; PORT=4411; PRICE="0.01"; CHEAT=""; PUBLIC_URL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --coordinator) COORDINATOR="${2%/}"; shift 2 ;;
@@ -20,6 +20,7 @@ while [[ $# -gt 0 ]]; do
     --port) PORT="$2"; shift 2 ;;
     --price) PRICE="$2"; shift 2 ;;
     --cheat) CHEAT="--cheat"; shift ;;
+    --public-url) PUBLIC_URL="${2%/}"; shift 2 ;;   # skip the tunnel: the agent reaches this node at this URL (e.g. a VM whose port is forwarded to the host)
     -h|--help) sed -n 2,12p "$0"; exit 0 ;;
     *) echo "unknown option $1 (try --help)" >&2; exit 1 ;;
   esac
@@ -38,9 +39,9 @@ NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 [[ "$NODE_MAJOR" -ge 22 ]] || fail "Node.js $(node --version) is too old; needs 22.13 or newer: brew install node"
 command -v docker >/dev/null || fail "Docker is missing. Install Docker Desktop (https://www.docker.com/products/docker-desktop/) and start it."
 docker info >/dev/null 2>&1 || fail "Docker is installed but not running. Start Docker Desktop and run this again."
-command -v cloudflared >/dev/null || fail "cloudflared is missing (it gives this node a public HTTPS address). Install: brew install cloudflared"
+[[ -n "$PUBLIC_URL" ]] || command -v cloudflared >/dev/null || fail "cloudflared is missing (it gives this node a public HTTPS address). Install: brew install cloudflared"
 curl -sf -m 10 "$COORDINATOR/state" >/dev/null || fail "cannot reach the coordinator at $COORDINATOR (ask for the current tunnel URL; it changes when the team laptop restarts it)"
-say "prerequisites ok: node $(node --version), docker $(docker version --format '{{.Server.Version}}'), cloudflared, coordinator reachable"
+say "prerequisites ok: node $(node --version), docker $(docker version --format '{{.Server.Version}}'), ${PUBLIC_URL:+fixed public URL}${PUBLIC_URL:-cloudflared}, coordinator reachable"
 
 # 2. packages and the pinned sandbox image
 # --ignore-scripts: no native builds (the Ledger packages ship prebuilt binaries the node never loads), so no Xcode tools needed
@@ -51,13 +52,15 @@ say "sandbox image ready: ${IMAGE:0:30}…"
 
 # 3. public HTTPS address for this node (the paying agent requires HTTPS off-localhost)
 mkdir -p .state/logs
-URL_FILE=".state/tunnel-${PORT}.url"
-scripts/tunnel.sh "$PORT" > ".state/logs/tunnel-${PORT}.log" 2>&1 &
-TUNNEL_PID=$!
-trap 'kill $TUNNEL_PID 2>/dev/null; exit 0' INT TERM
-for i in $(seq 1 60); do [[ -s "$URL_FILE" ]] && break; sleep 1; done
-PUBLIC_URL=$(cat "$URL_FILE" 2>/dev/null || true)
-[[ -n "$PUBLIC_URL" ]] || { kill $TUNNEL_PID 2>/dev/null; fail "the tunnel did not come up in 60 s (see .state/logs/tunnel-${PORT}.log)"; }
+if [[ -z "$PUBLIC_URL" ]]; then
+  URL_FILE=".state/tunnel-${PORT}.url"
+  scripts/tunnel.sh "$PORT" > ".state/logs/tunnel-${PORT}.log" 2>&1 &
+  TUNNEL_PID=$!
+  trap 'kill $TUNNEL_PID 2>/dev/null; exit 0' INT TERM
+  for i in $(seq 1 60); do [[ -s "$URL_FILE" ]] && break; sleep 1; done
+  PUBLIC_URL=$(cat "$URL_FILE" 2>/dev/null || true)
+  [[ -n "$PUBLIC_URL" ]] || { kill $TUNNEL_PID 2>/dev/null; fail "the tunnel did not come up in 60 s (see .state/logs/tunnel-${PORT}.log)"; }
+fi
 say "this node's public address: $PUBLIC_URL"
 
 # 4. run the node (team-public settings only; the node's own key is created on first start)
