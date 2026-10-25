@@ -6,6 +6,7 @@
     "node": ">=22.13"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
     "@ap4m/sdk": "https://hackathon.ap4m.build/sdk/ap4m-sdk.tgz",
     "ethers": "6.17.0",
     "xrpl": "^4.7.0"

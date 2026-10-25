@@ -15,7 +15,7 @@ contract Deploy is Script {
         ops[1] = vm.envAddress("OPERATOR2_ADDRESS");
         ops[2] = vm.envAddress("OPERATOR3_ADDRESS");
         vm.startBroadcast(pk);
-        GradewireRegistry registry = new GradewireRegistry(vm.envAddress("RLUSD_TOKEN"), vm.envAddress("APPROVER_ADDRESS"), vm.envAddress("TREASURY_ADDRESS"));
+        GradewireRegistry registry = new GradewireRegistry(vm.envAddress("RLUSD_TOKEN"), vm.envAddress("APPROVER_ADDRESS"), vm.envAddress("TREASURY_ADDRESS"), vm.envOr("MIN_BOND_WEI", uint256(10000000000000000)));
         GradingServiceManager sm = new GradingServiceManager(address(registry), ops, 2);
         registry.setServiceManager(address(sm));
         vm.stopBroadcast();

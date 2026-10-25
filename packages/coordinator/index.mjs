@@ -336,17 +336,25 @@ const server = createServer(async (req, res) => {
       if (!p) return send(res, 404, { error: 'unknown provider' });
       if (low(ethers.verifyMessage(resultSigningMessage(body.job_id, body.result_hash), body.sig)) !== providerAddr) return send(res, 400, { error: 'bad signature' });
       if (q('SELECT 1 FROM jobs WHERE id=?').get(job.job_id)) return send(res, 200, { duplicate: true });
+      // A sandbox fault after payment (status 'error') is a health failure, not a grade: it is
+      // not sampled (an honest machine would not reproduce it) and it costs reliability, not the bond.
+      const fault = body.status === 'error';
       const rate = samplingRateOf(p);
-      const sampled = p.status !== 'suspended' && Math.random() < rate;
+      const sampled = !fault && p.status !== 'suspended' && Math.random() < rate;
+      const verdict = fault ? 'error' : sampled ? 'pending' : 'not_sampled';
       q('INSERT INTO jobs(id,id_hash,spec,spec_hash,buyer,provider,price_wei,paid_tx,result_hash,reward,sampled,verdict,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-        .run(job.job_id, low(jobIdBytes(job.job_id)), canonicalJson(job), body.spec_hash, body.buyer ? low(body.buyer) : null, providerAddr, String(body.price_wei ?? ''), body.paid_tx ?? null, body.result_hash, Number(body.reward ?? 0), sampled ? 1 : 0, sampled ? 'pending' : 'not_sampled', now());
-      q('UPDATE providers SET jobs_ok=jobs_ok+1 WHERE address=?').run(providerAddr);
-      emit('job', { job_id: job.job_id, provider: providerAddr, buyer: body.buyer, reward: body.reward, result_hash: body.result_hash, paid_tx: body.paid_tx, price_rlusd: body.price_wei ? ethers.formatUnits(BigInt(body.price_wei), 18) : null, sampled, verdict: sampled ? 'pending' : 'not_sampled', explorer: body.paid_tx ? `${EXPLORER}/tx/${body.paid_tx}` : null });
+        .run(job.job_id, low(jobIdBytes(job.job_id)), canonicalJson(job), body.spec_hash, body.buyer ? low(body.buyer) : null, providerAddr, String(body.price_wei ?? ''), body.paid_tx ?? null, body.result_hash, Number(body.reward ?? 0), sampled ? 1 : 0, verdict, now());
+      if (fault) {
+        q('INSERT INTO incidents(provider,kind,detail,at) VALUES (?,?,?,?)').run(providerAddr, 'health', `sandbox fault on ${job.job_id} after payment; grade unusable`, now());
+        q('UPDATE providers SET heartbeats=MAX(0, heartbeats-6) WHERE address=?').run(providerAddr); // dents the uptime term
+      } else q('UPDATE providers SET jobs_ok=jobs_ok+1 WHERE address=?').run(providerAddr);
+      emit('job', { job_id: job.job_id, provider: providerAddr, buyer: body.buyer, reward: body.reward, result_hash: body.result_hash, paid_tx: body.paid_tx, price_rlusd: body.price_wei ? ethers.formatUnits(BigInt(body.price_wei), 18) : null, sampled, verdict, explorer: body.paid_tx ? `${EXPLORER}/tx/${body.paid_tx}` : null });
+      if (fault) pushProvider(providerAddr);
       if (sampled) {
         sendTx(`task ${job.job_id}`, () => smW.createVerificationTask(jobIdBytes(job.job_id), providerAddr, body.buyer || wallet.address, hex32(body.result_hash)))
           .catch((e) => { console.error(`[task] ${job.job_id}: ${e.shortMessage ?? e.message}`); q('UPDATE jobs SET verdict=\'error\' WHERE id=?').run(job.job_id); emit('verdict', { job_id: job.job_id, provider: providerAddr, pass: null, error: e.shortMessage ?? e.message }); });
       }
-      return send(res, 200, { sampled, verdict: sampled ? 'pending' : 'not_sampled', sampling_rate: rate });
+      return send(res, 200, { sampled, verdict, sampling_rate: rate });
     }
     const byHash = path.match(/^\/jobs\/by-hash\/(0x[0-9a-fA-F]{64})$/);
     if (req.method === 'GET' && byHash) { const job = jobByHash(byHash[1]); return job ? send(res, 200, { job_id: job.id }) : send(res, 404, { error: 'unknown job hash' }); }

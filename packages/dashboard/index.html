@@ -86,15 +86,15 @@
 <body>
 <header>
   <h1>Gradewire</h1>
-  <span class="sub">verified reward grading for RL · paid per grade in RLUSD via Mastercard AP4M on XRPL EVM</span>
+  <span class="sub">verified pay-per-job compute for AI agents · paid per job in RLUSD via Mastercard AP4M on XRPL EVM</span>
   <span class="live" id="live"><i></i><span>connecting</span></span>
   <span class="links" id="links"></span>
 </header>
 <main>
   <div class="kpis" id="kpis"></div>
   <section>
-    <h2>Providers</h2>
-    <div class="scroll"><table><thead><tr><th>Grader</th><th>Address</th><th>Status</th><th>Reliability score</th><th>Bond</th><th>Sampling</th><th>Grades</th><th>Verified</th><th>Last seen</th></tr></thead><tbody id="providers"></tbody></table></div>
+    <h2>Nodes</h2>
+    <div class="scroll"><table><thead><tr><th>Node</th><th>Address</th><th>Status</th><th>Reliability score</th><th>Bond</th><th>Sampling</th><th>Jobs</th><th>Verified</th><th>Last seen</th></tr></thead><tbody id="providers"></tbody></table></div>
   </section>
   <div class="grid2">
     <section>
@@ -103,15 +103,15 @@
     </section>
     <section>
       <h2>Verification tasks</h2>
-      <div class="scroll"><table><thead><tr><th>Task</th><th>Grader</th><th>Job</th><th>Operators</th><th>Verdict</th></tr></thead><tbody id="tasks"></tbody></table></div>
+      <div class="scroll"><table><thead><tr><th>Task</th><th>Node</th><th>Job</th><th>Operators</th><th>Verdict</th></tr></thead><tbody id="tasks"></tbody></table></div>
     </section>
   </div>
   <section>
-    <h2>Recent grades</h2>
-    <div class="scroll"><table><thead><tr><th>Job</th><th>Grader</th><th>Reward</th><th>Price</th><th>Payment</th><th>Verification</th></tr></thead><tbody id="jobs"></tbody></table></div>
+    <h2>Recent jobs</h2>
+    <div class="scroll"><table><thead><tr><th>Job</th><th>Node</th><th>Reward</th><th>Price</th><th>Payment</th><th>Verification</th></tr></thead><tbody id="jobs"></tbody></table></div>
   </section>
 </main>
-<footer>Status is shown as icon + label; grader identity by the colored dot. Every transaction links to the XRPL EVM Testnet explorer.</footer>
+<footer>Status is shown as icon + label; node identity by the colored dot. Every transaction links to the XRPL EVM Testnet explorer.</footer>
 <script>
 const $ = (id) => document.getElementById(id);
 const state = { providers: new Map(), jobs: new Map(), tasks: new Map(), payments: new Map(), incidents: [], feed: [], explorer: '', refundTotal: 0, deployment: {} };
@@ -141,25 +141,25 @@ function render() {
   const verified = jobs.filter((j) => j.verdict === 'pass' || j.verdict === 'fail').length;
   const caught = jobs.filter((j) => j.verdict === 'fail').length;
   $('kpis').innerHTML = [
-    ['Grades paid', jobs.length, ''],
-    ['RLUSD paid to graders', paid.toFixed(2), 'RLUSD'],
+    ['Jobs paid', jobs.length, ''],
+    ['RLUSD paid to nodes', paid.toFixed(2), 'RLUSD'],
     ['Verified on-chain', verified, `of ${jobs.filter((j) => j.sampled).length} sampled`],
     ['Cheaters caught', caught, ''],
-    ['Refunded to trainer', state.refundTotal.toFixed(3), 'RLUSD from slashed bonds'],
-    ['Active graders', providers.filter((p) => p.status === 'active').length, `of ${providers.length}`],
+    ['Refunded to the agent', state.refundTotal.toFixed(3), 'RLUSD from slashed bonds'],
+    ['Active nodes', providers.filter((p) => p.status === 'active').length, `of ${providers.length}`],
   ].map(([l, v, s]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}${s ? `<small>${s}</small>` : ''}</div></div>`).join('');
   $('providers').innerHTML = providers.map((p) => `<tr>
     <td><span class="dot" style="background:${colorOf(p.address)}"></span>${p.label || short(p.address)}</td>
     <td>${addrLink(p.address)}</td><td>${providerStatus(p)}</td>
     <td><span class="meter"><b style="width:${Math.round(p.score * 100)}%"></b></span>${p.score.toFixed(2)}</td>
     <td>${Number(p.bond_rlusd).toFixed(2)} RLUSD</td><td>${Math.round(p.sampling_rate * 100)}%</td>
-    <td>${p.jobs_ok}</td><td>${p.verified_ok} ok${p.verified_fail ? ` · <span class="st-bad">${p.verified_fail} failed</span>` : ''}</td><td>${ago(p.last_seen)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">no providers registered</td></tr>';
+    <td>${p.jobs_ok}</td><td>${p.verified_ok} ok${p.verified_fail ? ` · <span class="st-bad">${p.verified_fail} failed</span>` : ''}</td><td>${ago(p.last_seen)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">no nodes registered</td></tr>';
   const tasks = [...state.tasks.values()].sort((a, b) => b.task_id - a.task_id).slice(0, 30);
   $('tasks').innerHTML = tasks.map((t) => {
     const ops = (state.deployment.operators || []).map((o) => { const r = t.responses[o.toLowerCase()]; return `<i class="${r ? (r.matched ? 'm' : 'x') : ''}" title="${short(o)}: ${r ? (r.matched ? 'match' : 'mismatch') : 'no response yet'}"></i>`; }).join('');
     return `<tr><td>#${t.task_id}</td><td><span class="dot" style="background:${colorOf(t.provider)}"></span>${label(t.provider)}</td><td class="mono">${short(t.job_id || '')}</td><td><span class="ops">${ops}</span></td><td>${t.pass === true ? status('good', 'pass') : t.pass === false ? status('bad', 'fail · slashed') : status('warn', 'awaiting quorum')} ${txLink(t.verdict_tx || t.tx, 'tx')}</td></tr>`;
   }).join('') || '<tr><td colspan="5" class="empty">no verification tasks yet</td></tr>';
-  $('jobs').innerHTML = jobs.slice(0, 25).map((j) => `<tr><td class="mono">${short(j.id)}</td><td><span class="dot" style="background:${colorOf(j.provider)}"></span>${label(j.provider)}</td><td>${j.reward == null ? '—' : Number(j.reward).toFixed(2)}</td><td>${rlusd(j.price_rlusd, j.price_wei) != null ? `${rlusd(j.price_rlusd, j.price_wei).toFixed(2)} RLUSD` : '—'}</td><td>${txLink(j.paid_tx, 'VoucherRedeemed')}</td><td>${verdictCell(j.verdict)} ${txLink(j.verdict_tx, 'tx')} ${j.slash_tx ? txLink(j.slash_tx, 'slash') : ''} ${j.anchor_tx ? `<a class="mono" href="https://testnet.xrpl.org/transactions/${j.anchor_tx}" target="_blank" rel="noopener">XRPL</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">no grades yet</td></tr>';
+  $('jobs').innerHTML = jobs.slice(0, 25).map((j) => `<tr><td class="mono">${short(j.id)}</td><td><span class="dot" style="background:${colorOf(j.provider)}"></span>${label(j.provider)}</td><td>${j.reward == null ? '—' : Number(j.reward).toFixed(2)}</td><td>${rlusd(j.price_rlusd, j.price_wei) != null ? `${rlusd(j.price_rlusd, j.price_wei).toFixed(2)} RLUSD` : '—'}</td><td>${txLink(j.paid_tx, 'VoucherRedeemed')}</td><td>${verdictCell(j.verdict)} ${txLink(j.verdict_tx, 'tx')} ${j.slash_tx ? txLink(j.slash_tx, 'slash') : ''} ${j.anchor_tx ? `<a class="mono" href="https://testnet.xrpl.org/transactions/${j.anchor_tx}" target="_blank" rel="noopener">XRPL</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">no jobs yet</td></tr>';
   $('feed').innerHTML = state.feed.slice(0, 80).map((e) => `<div class="ev ${e.cls || ''}"><span class="t">${hhmmss(e.at)}</span><span class="who"><span class="dot" style="background:${colorOf(e.provider)}"></span>${e.who}</span><span class="what">${e.what}</span><span class="tx">${txLink(e.tx)}</span></div>`).join('') || '<div class="empty">waiting for events</div>';
 }
 
@@ -179,22 +179,22 @@ function applySnapshot(s) {
   // rebuild the feed from history (newest first) so a reload shows what already happened
   const feed = [];
   const byPaidTx = new Map(s.jobs.filter((j) => j.paid_tx).map((j) => [j.paid_tx.toLowerCase(), j]));
-  for (const j of s.jobs) feed.push({ at: j.created_at, provider: j.provider, who: label(j.provider), what: `graded <span class="mono">${short(j.id)}</span> reward ${j.reward == null ? '—' : Number(j.reward).toFixed(2)} <span class="m">${j.sampled ? '· sampled for verification' : '· not sampled'}</span>`, tx: j.paid_tx });
-  for (const p of s.payments) { const j = byPaidTx.get((p.tx || '').toLowerCase()); const prov = j?.provider || (p.submitter || '').toLowerCase(); feed.push({ at: p.at, provider: prov, who: label(prov), what: `voucher redeemed <span class="m">${(rlusd(p.amount_rlusd, p.amount_wei) || 0).toFixed(2)} RLUSD from the trainer</span>`, tx: p.tx }); }
+  for (const j of s.jobs) feed.push({ at: j.created_at, provider: j.provider, who: label(j.provider), what: `ran <span class="mono">${short(j.id)}</span> reward ${j.reward == null ? '—' : Number(j.reward).toFixed(2)} <span class="m">${j.sampled ? '· sampled for verification' : '· not sampled'}</span>`, tx: j.paid_tx });
+  for (const p of s.payments) { const j = byPaidTx.get((p.tx || '').toLowerCase()); const prov = j?.provider || (p.submitter || '').toLowerCase(); feed.push({ at: p.at, provider: prov, who: label(prov), what: `voucher redeemed <span class="m">${(rlusd(p.amount_rlusd, p.amount_wei) || 0).toFixed(2)} RLUSD from the agent</span>`, tx: p.tx }); }
   for (const v of s.verifications) { const t = state.tasks.get(v.task_id); feed.push({ at: v.at, provider: t?.provider, who: `verifier ${short(v.operator)}`, what: `re-ran task #${v.task_id}: <b>${v.matched ? 'hash matches' : 'hash does not match'}</b>`, tx: v.tx }); }
-  for (const t of state.tasks.values()) { if (t.pass == null || !t.verdict_tx) continue; const at = Math.max(0, ...s.verifications.filter((v) => v.task_id === t.task_id).map((v) => v.at || 0)); if (!at) continue; feed.push({ at: at + 1, provider: t.provider, who: label(t.provider), cls: t.pass ? '' : 'verdict-fail', what: t.pass ? 'verdict posted on-chain: <b>pass</b>' : 'verdict posted on-chain: <b>FAIL</b> <span class="m">· grade did not reproduce · payments stopped</span>', tx: t.verdict_tx }); }
-  for (const i of s.incidents) { if (i.kind === 'slash') { const m = i.detail.match(/([\d.]+) RLUSD refunded/); feed.push({ at: i.at, provider: i.provider, who: label(i.provider), cls: 'slash', what: `bond slashed: <b>${m ? m[1] : '?'} RLUSD refunded to the trainer</b>`, tx: i.tx }); } else if (i.kind === 'bond') feed.push({ at: i.at, provider: i.provider, who: label(i.provider), what: i.detail, tx: i.tx }); }
+  for (const t of state.tasks.values()) { if (t.pass == null || !t.verdict_tx) continue; const at = Math.max(0, ...s.verifications.filter((v) => v.task_id === t.task_id).map((v) => v.at || 0)); if (!at) continue; feed.push({ at: at + 1, provider: t.provider, who: label(t.provider), cls: t.pass ? '' : 'verdict-fail', what: t.pass ? 'verdict posted on-chain: <b>pass</b>' : 'verdict posted on-chain: <b>FAIL</b> <span class="m">· result did not reproduce · payments stopped</span>', tx: t.verdict_tx }); }
+  for (const i of s.incidents) { if (i.kind === 'slash') { const m = i.detail.match(/([\d.]+) RLUSD refunded/); feed.push({ at: i.at, provider: i.provider, who: label(i.provider), cls: 'slash', what: `bond slashed: <b>${m ? m[1] : '?'} RLUSD refunded to the agent</b>`, tx: i.tx }); } else if (i.kind === 'bond') feed.push({ at: i.at, provider: i.provider, who: label(i.provider), what: i.detail, tx: i.tx }); }
   state.feed = feed.filter((e) => e.at).sort((a, b) => b.at - a.at);
   render();
 }
 function handle(type, d) {
   if (type === 'provider') { state.providers.set(d.address, d); }
-  else if (type === 'payment') { state.payments.set(`${d.tx}:0`, d); push({ at: d.at, provider: d.provider, who: label(d.provider), what: `voucher redeemed <span class="m">${Number(d.amount_rlusd).toFixed(2)} RLUSD from the trainer${d.source === 'quicknode' ? ' · via Quicknode Stream' : ''}</span>`, tx: d.tx }); }
-  else if (type === 'job') { state.jobs.set(d.job_id, { id: d.job_id, provider: d.provider, reward: d.reward, price_rlusd: d.price_rlusd, paid_tx: d.paid_tx, sampled: d.sampled, verdict: d.verdict, created_at: d.at }); push({ at: d.at, provider: d.provider, who: label(d.provider), what: `graded <span class="mono">${short(d.job_id)}</span> reward ${Number(d.reward).toFixed(2)} <span class="m">${d.sampled ? '· sampled for verification' : '· not sampled'}</span>`, tx: d.paid_tx }); }
+  else if (type === 'payment') { state.payments.set(`${d.tx}:0`, d); push({ at: d.at, provider: d.provider, who: label(d.provider), what: `voucher redeemed <span class="m">${Number(d.amount_rlusd).toFixed(2)} RLUSD from the agent${d.source === 'quicknode' ? ' · via Quicknode Stream' : ''}</span>`, tx: d.tx }); }
+  else if (type === 'job') { state.jobs.set(d.job_id, { id: d.job_id, provider: d.provider, reward: d.reward, price_rlusd: d.price_rlusd, paid_tx: d.paid_tx, sampled: d.sampled, verdict: d.verdict, created_at: d.at }); push({ at: d.at, provider: d.provider, who: label(d.provider), what: `ran <span class="mono">${short(d.job_id)}</span> reward ${Number(d.reward).toFixed(2)} <span class="m">${d.sampled ? '· sampled for verification' : '· not sampled'}</span>`, tx: d.paid_tx }); }
   else if (type === 'task') { state.tasks.set(d.task_id, { task_id: d.task_id, job_id: d.job_id, provider: d.provider, tx: d.tx, pass: null, responses: {} }); const j = state.jobs.get(d.job_id); if (j) j.task_id = d.task_id; push({ at: d.at, provider: d.provider, who: 'coordinator', what: `opened verification task #${d.task_id} <span class="m">for ${label(d.provider)}</span>`, tx: d.tx }); }
   else if (type === 'response') { const t = state.tasks.get(d.task_id); if (t) t.responses[d.operator.toLowerCase()] = { matched: d.matched }; push({ at: d.at, provider: d.provider, who: `verifier ${short(d.operator)}`, what: `re-ran task #${d.task_id}: <b>${d.matched ? 'hash matches' : 'hash does not match'}</b>`, tx: d.tx }); }
-  else if (type === 'verdict') { const j = state.jobs.get(d.job_id); if (j) { j.verdict = d.pass === true ? 'pass' : d.pass === false ? 'fail' : 'error'; j.verdict_tx = d.tx; } const t = state.tasks.get(d.task_id); if (t) { t.pass = d.pass; t.verdict_tx = d.tx; } push({ at: d.at, provider: d.provider, who: label(d.provider), cls: d.pass === false ? 'verdict-fail' : '', what: d.pass ? `verdict posted on-chain: <b>pass</b>` : d.pass === false ? `verdict posted on-chain: <b>FAIL</b> <span class="m">· grade did not reproduce · payments stopped</span>` : `verification error <span class="m">${d.error || ''}</span>`, tx: d.tx }); }
-  else if (type === 'slash') { state.refundTotal += Number(d.refund_rlusd); const j = state.jobs.get(d.job_id); if (j) j.slash_tx = d.tx; push({ at: d.at, provider: d.provider, who: label(d.provider), cls: 'slash', what: `bond slashed: <b>${Number(d.refund_rlusd).toFixed(3)} RLUSD refunded to the trainer</b> <span class="m">· ${Number(d.verifier_reward_rlusd).toFixed(3)} to verifiers · ${Number(d.treasury_rlusd).toFixed(3)} treasury</span>`, tx: d.tx }); }
+  else if (type === 'verdict') { const j = state.jobs.get(d.job_id); if (j) { j.verdict = d.pass === true ? 'pass' : d.pass === false ? 'fail' : 'error'; j.verdict_tx = d.tx; } const t = state.tasks.get(d.task_id); if (t) { t.pass = d.pass; t.verdict_tx = d.tx; } push({ at: d.at, provider: d.provider, who: label(d.provider), cls: d.pass === false ? 'verdict-fail' : '', what: d.pass ? `verdict posted on-chain: <b>pass</b>` : d.pass === false ? `verdict posted on-chain: <b>FAIL</b> <span class="m">· result did not reproduce · payments stopped</span>` : `verification error <span class="m">${d.error || ''}</span>`, tx: d.tx }); }
+  else if (type === 'slash') { state.refundTotal += Number(d.refund_rlusd); const j = state.jobs.get(d.job_id); if (j) j.slash_tx = d.tx; push({ at: d.at, provider: d.provider, who: label(d.provider), cls: 'slash', what: `bond slashed: <b>${Number(d.refund_rlusd).toFixed(3)} RLUSD refunded to the agent</b> <span class="m">· ${Number(d.verifier_reward_rlusd).toFixed(3)} to verifiers · ${Number(d.treasury_rlusd).toFixed(3)} treasury</span>`, tx: d.tx }); }
   else if (type === 'bond') { push({ at: d.at, provider: d.provider, who: label(d.provider), what: d.withdrawn ? `withdrew bond with an approver signature <span class="m">(remaining ${Number(d.total_rlusd).toFixed(2)} RLUSD)</span>` : `posted a ${Number(d.total_rlusd).toFixed(2)} RLUSD bond`, tx: d.tx }); }
   else if (type === 'anchor') { const j = state.jobs.get(d.job_id); if (j) j.anchor_tx = d.xrpl_tx; push({ at: d.at, provider: d.provider, who: 'coordinator', what: `anchored verdict #${d.task_id} on the XRP Ledger <a class="mono" href="${d.url}" target="_blank" rel="noopener">${short(d.xrpl_tx)}</a>` }); }
   render();

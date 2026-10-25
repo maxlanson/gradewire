@@ -10,7 +10,7 @@ for i in $(seq 1 30); do curl -sf http://127.0.0.1:4500/state >/dev/null && brea
 start verifier-1 scripts/verifier.sh 1
 start verifier-2 scripts/verifier.sh 2
 start verifier-3 scripts/verifier.sh 3
-start node-4401 scripts/node.sh --port 4401 --label "Grader A"
-start node-4402 scripts/node.sh --port 4402 --label "Grader B"
-start node-4403 scripts/node.sh --port 4403 --label "Grader C" --cheat
+start node-4401 scripts/node.sh --port 4401 --label "Node A"
+start node-4402 scripts/node.sh --port 4402 --label "Node B"
+start node-4403 scripts/node.sh --port 4403 --label "Node C" --cheat
 echo "dashboard: http://127.0.0.1:4500/   logs: tail -f .state/logs/*.log"

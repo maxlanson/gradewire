@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildResult } from '../shared/index.mjs';
+import { buildResult, SCRIPT_KIND } from '../shared/index.mjs';
 
 const RUNNER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../sandbox');
 const MARKER = 'GRADEWIRE_RESULT ';
@@ -40,7 +40,7 @@ export async function runJob(job) {
     }
     utimesSync(workDir, 0, 0);
     const args = [
-      'run', '--rm', '--name', name,
+      'run', '--rm', '--name', name, '--hostname', 'gradewire', // fixed hostname: Docker's default is the random container id
       '--network', 'none',
       '--cpus', '1', '--memory', '512m', '--pids-limit', '128',
       '--read-only', '--tmpfs', '/tmp:size=64m',
@@ -60,8 +60,18 @@ export async function runJob(job) {
     if (run.code >= 125 && run.code <= 127) throw new Error(`sandbox failed to start (${run.code}): ${run.stderr.trim()}`);
     const line = run.stdout.split('\n').filter((l) => l.startsWith(MARKER)).pop();
     if (run.code !== 0 || !line) return buildResult(job, { status: 'error', exit_code: run.code, tests: [] });
-    let tests;
-    try { ({ tests } = JSON.parse(line.slice(MARKER.length))); } catch { tests = null; }
+    let parsed;
+    try { parsed = JSON.parse(line.slice(MARKER.length)); } catch { parsed = null; }
+    if (!parsed) return buildResult(job, { status: 'error', exit_code: run.code, tests: [] });
+    if (job.kind === SCRIPT_KIND) {
+      // status 'ok' means the program ran to completion (any exit code); the runner's own
+      // exit code is 0 in that case. A malformed runner line is a sandbox error, not a result.
+      if (typeof parsed.output !== 'string' || !Number.isInteger(parsed.exit_code) || typeof parsed.truncated !== 'boolean') {
+        return buildResult(job, { status: 'error', exit_code: run.code, tests: [] });
+      }
+      return buildResult(job, { status: 'ok', exit_code: parsed.exit_code, output: parsed.output, truncated: parsed.truncated });
+    }
+    const { tests } = parsed;
     if (!Array.isArray(tests) || !tests.every((t) => t && typeof t.name === 'string')) {
       return buildResult(job, { status: 'error', exit_code: run.code, tests: [] });
     }

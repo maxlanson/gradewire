@@ -4,7 +4,7 @@
 // request URL and computes the content once the Voucher is redeemed on-chain. The safety
 // logic (persist before submit, reconcile on retry, never redeem twice) is kept as-is.
 
-import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, unlinkSync } from 'node:fs';
+import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -40,13 +40,25 @@ export function createX402Resources(config) {
   }
   chmodSync(config.stateDirectory, 0o700);
   const lockPath = join(config.stateDirectory, 'merchant.lock');
+  // The lock holds the owner's pid. A lock whose owner is gone (a node that crashed or was killed
+  // without closing) is stale and is reclaimed; a lock owned by a live process is a hard error.
+  const takeLock = () => { const fd = openSync(lockPath, 'wx', 0o600); writeFileSync(fd, String(process.pid)); return fd; };
   let lock;
   try {
-    lock = openSync(lockPath, 'wx', 0o600);
+    lock = takeLock();
   } catch (error) {
     if (error.code !== 'EEXIST') throw error;
-    throw new Error(`${lockPath} exists: another node is using this state directory, or an earlier run stopped without closing. `
-      + 'If no node process is running, delete merchant.lock (never merchant.sqlite) and start again.');
+    const owner = Number(readFileSync(lockPath, 'utf8').trim());
+    let alive = false;
+    if (Number.isInteger(owner) && owner > 0 && owner !== process.pid) {
+      try { process.kill(owner, 0); alive = true; } catch (e) { alive = e.code === 'EPERM'; }
+    }
+    if (alive) {
+      throw new Error(`${lockPath} is held by running node pid ${owner}: another node is using this state directory.`);
+    }
+    console.log(`[x402] reclaiming stale ${lockPath} (owner ${owner || 'unknown'} is gone)`);
+    unlinkSync(lockPath);
+    lock = takeLock();
   }
   const dbPath = join(config.stateDirectory, 'merchant.sqlite');
   let db;
@@ -73,6 +85,7 @@ export function createX402Resources(config) {
     response.setHeader('Cache-Control', 'no-store, private');
     response.setHeader('Vary', 'PAYMENT-SIGNATURE, X-AP4M-CHANNEL-ID');
     if (closing || queued >= 32) return send(response, 503, { error: 'merchant_busy' });
+    if (!config.resolve(resourceUrl)) return send(response, 404, { error: 'unknown_resource' }); // never queue junk URLs
     queued++;
     const work = queue.then(() => handle(incoming, response, resourceUrl)).catch((error) => {
       console.error(`[x402] ${resourceUrl}: ${error.message}`);

@@ -8,6 +8,8 @@ import { createHash } from 'node:crypto';
 // run the same image release.
 export const SANDBOX_IMAGE = 'python@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704';
 export const JOB_KIND = 'python-fn-tests';
+export const SCRIPT_KIND = 'python-script';
+export const JOB_KINDS = [JOB_KIND, SCRIPT_KIND];
 export const MAX_JOB_BYTES = 64 * 1024;
 export const DEFAULT_TIMEOUT_S = 20;
 
@@ -37,7 +39,7 @@ export function parseJob(input) {
   for (const key of Object.keys(input)) if (!allowed.includes(key)) throw new Error(`unknown job field: ${key}`);
   const { job_id, kind, image, timeout_s = DEFAULT_TIMEOUT_S, files, reward_rule = 'fraction_passed', max_price } = input;
   if (typeof job_id !== 'string' || !/^j_[a-z0-9]{8,40}$/.test(job_id)) throw new Error('job_id must match j_[a-z0-9]{8,40}');
-  if (kind !== JOB_KIND) throw new Error(`kind must be ${JOB_KIND}`);
+  if (!JOB_KINDS.includes(kind)) throw new Error(`kind must be one of ${JOB_KINDS.join(', ')}`);
   if (image !== SANDBOX_IMAGE) throw new Error('image must be the pinned sandbox image');
   if (!Number.isInteger(timeout_s) || timeout_s < 1 || timeout_s > 60) throw new Error('timeout_s must be 1..60');
   if (reward_rule !== 'fraction_passed') throw new Error('reward_rule must be fraction_passed');
@@ -51,7 +53,9 @@ export function parseJob(input) {
     seen.add(f.path);
     return { path: f.path, content: f.content };
   }).sort((a, b) => (a.path < b.path ? -1 : 1));
-  if (!cleanFiles.some((f) => f.path.startsWith('test_'))) throw new Error('job needs at least one test_*.py file');
+  if (kind === JOB_KIND && !cleanFiles.some((f) => f.path.startsWith('test_'))) throw new Error('job needs at least one test_*.py file');
+  if (kind === SCRIPT_KIND && !cleanFiles.some((f) => f.path === 'main.py')) throw new Error('script job needs main.py');
+  if (kind === JOB_KIND && cleanFiles.some((f) => f.path === 'main.py')) throw new Error('test jobs must not contain main.py');
   const job = { job_id, kind, image, timeout_s, files: cleanFiles, reward_rule, max_price };
   if (Buffer.byteLength(canonicalJson(job)) > MAX_JOB_BYTES) throw new Error('job exceeds 64 KiB');
   return job;
@@ -59,8 +63,17 @@ export function parseJob(input) {
 
 export const specHash = (job) => sha256(canonicalJson(job));
 
-// Builds the canonical result that gets hashed. Tests sorted by name; reward = passed / total.
-export function buildResult(job, { status, exit_code, tests }) {
+// Builds the canonical result that gets hashed.
+//   python-fn-tests: tests sorted by name; reward = passed / total.
+//   python-script:   the program's stdout (bounded to 16 KiB by the runner); reward is 1 only when
+//                    the program ran (status ok) and exited 0. On timeout or error the output is
+//                    blank and truncated is false, so those results are stable regardless of what
+//                    the program managed to print before it was killed.
+export function buildResult(job, { status, exit_code, tests = [], output = '', truncated = false }) {
+  if (job.kind === SCRIPT_KIND) {
+    const ran = status === 'ok';
+    return { job_id: job.job_id, spec_hash: specHash(job), status, exit_code, output: ran ? output : '', truncated: ran && truncated === true, reward: ran && exit_code === 0 ? 1 : 0 };
+  }
   const sorted = [...tests].map((t) => ({ name: t.name, passed: t.passed === true }))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const passed = sorted.filter((t) => t.passed).length;

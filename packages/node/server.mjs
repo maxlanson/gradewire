@@ -25,7 +25,7 @@ import { ethers } from 'ethers';
 
 import { loadX402Context } from '../ap4m/ap4m-x402.mjs';
 import { contracts, loadDeployment, rpcUrl, STATUS } from '../shared/chain.mjs';
-import { buildResult, canonicalJson, parseJob, resultHash, resultSigningMessage, SANDBOX_IMAGE } from '../shared/index.mjs';
+import { buildResult, canonicalJson, parseJob, resultHash, resultSigningMessage, SANDBOX_IMAGE, SCRIPT_KIND } from '../shared/index.mjs';
 import { runJob } from './sandbox.mjs';
 import { createX402Resources, send } from './x402.mjs';
 
@@ -52,9 +52,13 @@ function loadIdentity() {
   return new ethers.Wallet(JSON.parse(readFileSync(file, 'utf8')).privateKey);
 }
 
-// Cheating mode: claim every test passed without running anything. Test names are read from
-// the test files so the fake looks exactly like an honest result.
+// Cheating mode: claim success without running anything.
+//   python-fn-tests: every test passed. Test names are read from the test files so the fake
+//                    looks exactly like an honest result.
+//   python-script:   a clean exit with a canned, plausible-looking stdout. The verifier's
+//                    re-run produces the real output, so the hashes differ and the cheat is caught.
 function fakeResult(job) {
+  if (job.kind === SCRIPT_KIND) return buildResult(job, { status: 'ok', exit_code: 0, output: '42\n', truncated: false });
   const tests = [];
   for (const f of job.files) {
     if (!f.path.startsWith('test_')) continue;
@@ -117,7 +121,13 @@ async function main() {
           running++;
           try {
             const t0 = Date.now();
-            const result = CHEAT ? fakeResult(job) : await runJob(job);
+            let result;
+            try { result = CHEAT ? fakeResult(job) : await runJob(job); } catch (error) {
+              // The Voucher is already redeemed: never leave the buyer without a signed result.
+              // A sandbox fault (Docker down, image missing) is reported as a health failure, not a grade.
+              console.error(`[grade] ${job.job_id} sandbox fault: ${error.message}`);
+              result = buildResult(job, { status: 'error', exit_code: -2, tests: [] });
+            }
             const hash = resultHash(result);
             const sig = await identity.signMessage(resultSigningMessage(job.job_id, hash));
             graded++;
@@ -125,7 +135,7 @@ async function main() {
             if (!args['no-network']) {
               withRetry(`report ${job.job_id}`, () => postJson(`${COORDINATOR_URL}/results`, {
                 job_id: job.job_id, spec: job, spec_hash: result.spec_hash, result_hash: hash, sig, provider: identity.address,
-                buyer: agent, paid_tx: transactionHash, price_wei: priceWei, reward: result.reward,
+                buyer: agent, paid_tx: transactionHash, price_wei: priceWei, reward: result.reward, status: result.status,
               })).then((r) => { if (r.sampled) console.log(`[report] ${job.job_id} sampled for verification`); })
                 .catch((e) => console.error(`[report] ${job.job_id}: ${e.message}`));
             }
