@@ -77,7 +77,7 @@ server.registerTool('gradewire_run', {
     min_score: z.string().regex(/^(0(\.\d+)?|1(\.0+)?)$/).optional().describe('lowest node reliability score to accept (default 0.8)'),
   },
 }, async ({ programs, max_price_rlusd = '0.01', min_score = '0.8' }) => {
-  const scriptJob = (code) => ({ job_id: `j_${randomBytes(8).toString('hex')}`, kind: SCRIPT_KIND, image: SANDBOX_IMAGE, timeout_s: 20, files: [{ path: 'main.py', content: code }], reward_rule: 'fraction_passed', max_price: max_price_rlusd });
+  const scriptJob = (code) => ({ job_id: `j_${randomBytes(8).toString('hex')}`, kind: SCRIPT_KIND, image: SANDBOX_IMAGE, timeout_s: 45, files: [{ path: 'main.py', content: code }], reward_rule: 'fraction_passed', max_price: max_price_rlusd });
   for (const p of programs) parseJob(scriptJob(p.code)); // rejects anything a node would refuse before any payment
   const items = programs.map((p) => ({ id: p.id, files: [{ path: 'main.py', content: p.code }] }));
   const events = [];

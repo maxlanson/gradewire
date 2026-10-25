@@ -22,9 +22,9 @@ import { describeTrust } from '../shared/trust.mjs';
 const sdk = createRequire(import.meta.url)('../ap4m/ap4m-hackathon-sdk.cjs');
 
 const VERDICT_WAIT_MS = 150_000;
-// A node's /grade call covers its on-chain redemption (12-25 s) and the job's run (up to 20 s),
-// so a healthy call can take 45 s; anything past this is a node that went away mid-job.
-const NODE_REQUEST_TIMEOUT_MS = 60_000;
+// A node's /grade call covers its on-chain redemption (12-25 s) and the job's run (up to 45 s),
+// so a healthy call can take 70 s; anything past this is a node that went away mid-job.
+const NODE_REQUEST_TIMEOUT_MS = 100_000; // redemption (12-25 s) + a job of up to 45 s, with margin
 const UNREACHABLE = /fetch failed|ECONN|ENOTFOUND|EHOSTUNREACH|socket hang up|timed? ?out|aborted|AbortError|\b5[023][0-9]\b/i;
 const nodeFetch = (url, init = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(NODE_REQUEST_TIMEOUT_MS) });
 

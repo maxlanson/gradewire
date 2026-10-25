@@ -57,7 +57,7 @@ const PLAN_SYSTEM = `You split a question into independent Python 3 programs tha
 Rules for every program:
 - Python 3.12, standard library only. No pip packages, no network, no files, no subprocesses, no threads, no input().
 - Fully deterministic: no randomness, no clock, no environment lookups, no hash-order dependence (sort before printing). Two machines must print exactly the same bytes.
-- Must finish in under 15 seconds on one CPU core with 512 MB of RAM. Prefer simple, fast algorithms; keep memory modest (a bytearray sieve is fine, giant lists of Python ints are not).
+- Should do real work: aim for 10 to 25 seconds of CPU on one core (it is fine to compute more than strictly needed, e.g. sieve a larger range or cross-check by a second method), but must finish in under 40 seconds with 512 MB of RAM. Keep memory modest (a bytearray sieve is fine, giant lists of Python ints are not).
 - Print the result to stdout as short labelled text, under 2 KB.
 Write between 1 and ${PARTS} programs. The parts run in parallel on different machines, so prefer exactly ${PARTS} parts whenever the work can be partitioned (numeric ranges, cases, sub-questions), and make each part useful alone; write a single program only when splitting makes no sense. Each program must be independent of the others (no shared state, no reading another part's output).
 If the question is not computational, write one program that computes whatever evidence best supports a precise answer.
@@ -145,7 +145,7 @@ async function makePlan(question) {
   throw new Error(`could not get a valid plan: ${lastError}`);
 }
 
-const scriptJob = (code) => ({ job_id: `j_${randomBytes(8).toString('hex')}`, kind: SCRIPT_KIND, image: SANDBOX_IMAGE, timeout_s: 20, files: [{ path: 'main.py', content: code }], reward_rule: 'fraction_passed', max_price: args['max-price'] });
+const scriptJob = (code) => ({ job_id: `j_${randomBytes(8).toString('hex')}`, kind: SCRIPT_KIND, image: SANDBOX_IMAGE, timeout_s: 45, files: [{ path: 'main.py', content: code }], reward_rule: 'fraction_passed', max_price: args['max-price'] });
 
 // ── main ─────────────────────────────────────────────────────────────────────
 
@@ -178,7 +178,7 @@ async function main() {
   }
   say();
   if (args['dry-run']) {
-    say('dry run: every program parsed as a python-script job (image pinned by digest, 20 s timeout, no network). Nothing was paid.');
+    say('dry run: every program parsed as a python-script job (image pinned by digest, 45 s timeout, no network). Nothing was paid.');
     say(`a live run would pay up to ${plan.programs.length} × ${args['max-price']} RLUSD over AP4M x402 and verify the results on XRPL EVM.`);
     return;
   }

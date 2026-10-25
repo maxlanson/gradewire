@@ -211,7 +211,16 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const state = { providers: new Map(), jobs: new Map(), tasks: new Map(), payments: new Map(), budgets: new Map(), feed: [], explorer: '', refundTotal: 0, deployment: {}, sampling: 0.5 };
-const colorOf = (() => { const order = []; return (addr) => { if (!addr) return 'var(--ink-3)'; const a = addr.toLowerCase(); let i = order.indexOf(a); if (i < 0) { order.push(a); i = order.length - 1; } return `var(--n${Math.min(i + 1, 5)})`; }; })();
+// Node colours follow the letter in the label (Node A blue, B orange, C violet, D gold, E pink),
+// whatever order the nodes registered in; unlabelled nodes take the next free colour.
+const colorOf = (() => { const order = []; return (addr) => {
+  if (!addr) return 'var(--ink-3)';
+  const a = addr.toLowerCase();
+  const m = /node\s+([a-e])\b/i.exec(state.providers.get(a)?.label || '');
+  if (m) return `var(--n${m[1].toUpperCase().charCodeAt(0) - 64})`;
+  let i = order.indexOf(a); if (i < 0) { order.push(a); i = order.length - 1; }
+  return `var(--n${Math.min(i + 1, 5)})`;
+}; })();
 const label = (addr) => state.providers.get((addr || '').toLowerCase())?.label || (addr ? addr.slice(0, 6) + '…' + addr.slice(-4) : '—');
 const verifierName = (op) => { const i = (state.deployment.operators || []).findIndex((o) => o.toLowerCase() === (op || '').toLowerCase()); return i < 0 ? `verifier ${short(op)}` : `Verifier ${i + 1}`; };
 const short = (h) => h ? h.slice(0, 8) + '…' + h.slice(-4) : '';
