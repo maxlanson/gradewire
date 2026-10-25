@@ -326,8 +326,11 @@ const server = createServer(async (req, res) => {
     // starts empty while the nodes keep running. Nodes are not restarted; their trust restarts at
     // "new" (one job at a time). Local only (the coordinator listens on loopback and the VM bridge).
     if (req.method === 'POST' && path === '/admin/reset') {
+      const body = await readBody(req).catch(() => ({}));
+      const dropToo = (Array.isArray(body?.drop) ? body.drop : []).map((a) => low(String(a)));
       for (const t of ['jobs', 'verifications', 'incidents', 'payments', 'events', 'budgets', 'benchmarks', 'telemetry']) q(`DELETE FROM ${t}`).run();
-      const gone = q('SELECT address, label, status FROM providers WHERE status=\'suspended\' OR last_seen IS NULL OR last_seen < ?').all(now() - OFFLINE_AFTER_MS);
+      const gone = q('SELECT address, label, status FROM providers WHERE status=\'suspended\' OR last_seen IS NULL OR last_seen < ?').all(now() - OFFLINE_AFTER_MS)
+        .concat(dropToo.map((a) => getProvider(a)).filter(Boolean).map((p) => ({ address: p.address, label: p.label, status: 'replaced' })));
       for (const g of gone) q('DELETE FROM providers WHERE address=?').run(g.address);
       q('UPDATE providers SET jobs_ok=0, verified_ok=0, verified_fail=0, trust_penalty=0, heartbeats=1, first_seen=?, registered_at=?').run(now(), now());
       budgets.clear(); offline.clear();
