@@ -1,6 +1,7 @@
-// Gradewire as a tool for any AI agent, over MCP (stdio). Three tools:
+// Gradewire as a tool for any AI agent, over MCP (stdio). Four tools:
 //   gradewire_nodes   which nodes are selling compute, with price, reliability and earned trust
-//   gradewire_run     pay nodes to run deterministic Python programs; results come back only when
+//   gradewire_run     start paying nodes to run deterministic Python programs (returns a run id)
+//   gradewire_wait    follow that run; results come back only when
 //                     verified (3 independent re-runs, verdict on-chain) or not sampled this time;
 //                     a node whose result does not reproduce is slashed and its work rerouted
 //   gradewire_status  what the network has paid, verified, caught and refunded so far
@@ -68,9 +69,27 @@ const Program = z.object({
   code: z.string().min(1).max(8192).describe('a self-contained, deterministic Python 3 program: no network, no randomness, no clock, prints its result to stdout, finishes within 20 s on one CPU core'),
 });
 
+// Runs are asynchronous: gradewire_run returns a run id at once (an MCP host may time out a
+// tool call after a minute, and a run takes one to three), and gradewire_wait reports progress
+// and, when done, the results. Runs live in memory for the life of this server process.
+const runs = new Map();
+const describeEvent = (e) => {
+  switch (e.type) {
+    case 'dispatch': return `${e.provider}: 402 received for ${e.id}, paying ${fmt(e.price_wei)} RLUSD${e.attempt > 1 ? ` (attempt ${e.attempt})` : ''}`;
+    case 'paid': return `${e.provider}: paid ${fmt(e.price_wei)} RLUSD for ${e.id}, output received (${e.result.status}, exit ${e.result.exit_code}) ${e.explorer}/tx/${e.tx}`;
+    case 'verdict': return e.verdict === 'pass' ? `${e.provider}: ${e.id} verified on-chain by 3 re-runs ${e.explorer}/tx/${e.verdict_tx}` : e.verdict === 'not_sampled' ? `${e.provider}: ${e.id} not sampled this time, accepted on earned trust` : e.verdict === 'fail' ? `${e.provider}: ${e.id} FAILED verification (result did not reproduce), discarded and rerouted ${e.explorer}/tx/${e.verdict_tx}` : `${e.provider}: ${e.id} verdict ${e.verdict}`;
+    case 'fraud': return `${e.provider} caught cheating: bond slashed, this agent refunded${e.slash_tx ? ` ${e.explorer}/tx/${e.slash_tx}` : ''}`;
+    case 'reroute': return `${e.id} leaves ${e.provider} (${e.reason})`;
+    case 'return': return `${e.provider} is back online (score ${e.score}, ${describeTrust(e.trust)}); given work again`;
+    case 'trust': return `${e.provider} trust ${e.max_inflight > e.previous_inflight ? 'up' : 'down'}: ${describeTrust(e)}`;
+    case 'giveup': return `gave up on ${e.id} after ${e.attempts} attempts`;
+    default: return null;
+  }
+};
+
 server.registerTool('gradewire_run', {
   title: 'Run programs on paid, verified nodes',
-  description: 'Pays untrusted nodes in RLUSD over Mastercard AP4M x402 (one HTTP 402 payment per program) to run your Python programs in a locked-down deterministic sandbox, waits for the coordinator\'s verdict on each, and returns outputs you can rely on: each result is either "pass" (3 independent verifiers re-ran the program and the hash matched, verdict posted on XRPL EVM) or "not_sampled" (accepted on the node\'s earned trust). A result that does not reproduce slashes the node\'s bond, refunds this agent and is rerouted to another node automatically. Write programs that print everything you need; stdout is capped at 16 KiB. Typical cost 0.01 RLUSD per program, 30-90 s wall time.',
+  description: 'Starts paying untrusted nodes in RLUSD over Mastercard AP4M x402 (one HTTP 402 payment per program) to run your Python programs in a locked-down deterministic sandbox. Returns immediately with a run_id; call gradewire_wait with it to follow progress and get the results. Each result ends up either "pass" (3 independent verifiers re-ran the program and the hash matched, verdict posted on XRPL EVM) or "not_sampled" (accepted on the node\'s earned trust). A result that does not reproduce slashes the node\'s bond, refunds this agent and is rerouted to another node automatically; a node that goes offline mid-job is rerouted around. Write programs that print everything you need; stdout is capped at 16 KiB; aim for about 10 s of CPU, under 30 s. Typical cost 0.01 RLUSD per program, 1-3 minutes wall time for a batch.',
   inputSchema: {
     programs: z.array(Program).min(1).max(8),
     max_price_rlusd: z.string().regex(/^\d+(\.\d+)?$/).optional().describe('most to pay per program (default 0.01)'),
@@ -79,12 +98,21 @@ server.registerTool('gradewire_run', {
 }, async ({ programs, max_price_rlusd = '0.01', min_score = '0.8' }) => {
   const scriptJob = (code) => ({ job_id: `j_${randomBytes(8).toString('hex')}`, kind: SCRIPT_KIND, image: SANDBOX_IMAGE, timeout_s: 45, files: [{ path: 'main.py', content: code }], reward_rule: 'fraction_passed', max_price: max_price_rlusd });
   for (const p of programs) parseJob(scriptJob(p.code)); // rejects anything a node would refuse before any payment
+  if ([...runs.values()].some((r) => r.status === 'running')) return { content: [{ type: 'text', text: 'a run is already in progress; call gradewire_wait on it first (the payment Channels are shared)' }], isError: true };
+  const id = `run_${randomBytes(4).toString('hex')}`;
+  const run = { id, status: 'running', started: Date.now(), events: [], lines: [], outcome: null, error: null, programs: programs.map((p) => p.id) };
+  runs.set(id, run);
   const items = programs.map((p) => ({ id: p.id, files: [{ path: 'main.py', content: p.code }] }));
-  const events = [];
-  const outcome = await runPaidJobs({
+  runPaidJobs({
     items, buildJob: (item) => parseJob(scriptJob(item.files[0].content)), maxPrice: max_price_rlusd, minScore: min_score,
-    settle: false, log, agentTag: '[mcp]', onEvent: (e) => { if (['dispatch', 'paid', 'verdict', 'fraud', 'reroute', 'trust', 'giveup'].includes(e.type)) events.push(e); },
-  });
+    settle: false, log, agentTag: '[mcp]',
+    onEvent: (e) => { const text = describeEvent(e); if (text) run.lines.push(`${new Date().toISOString().slice(11, 19)} ${text}`); if (e.type !== 'done') run.events.push(e); },
+  }).then((outcome) => { run.outcome = outcome; run.status = 'done'; }).catch((e) => { run.error = String(e?.message || e); run.status = 'failed'; });
+  return { content: [{ type: 'text', text: `run ${id} started: ${programs.length} program(s) sent to the network. Call gradewire_wait with run_id "${id}" (it returns within ~45 s with progress, and the results once done).` }], structuredContent: { run_id: id, status: 'running', programs: run.programs, dashboard: `${COORD}/` } };
+});
+
+function summarize(run) {
+  const outcome = run.outcome;
   const results = outcome.results.map((r) => ({
     id: r.id, node: r.provider, verdict: r.verdict, usable: (r.verdict === 'pass' || r.verdict === 'not_sampled') && r.result.status === 'ok',
     status: r.result.status, exit_code: r.result.exit_code, output: r.result.output, truncated: r.result.truncated,
@@ -92,16 +120,35 @@ server.registerTool('gradewire_run', {
   }));
   const paid = outcome.results.reduce((a, r) => a + Number(fmt(r.price_wei)), 0);
   const caught = outcome.events.filter((e) => e.kind === 'fraud');
-  const refunded = Number(fmt(outcome.endBalance - outcome.startBalance + BigInt(0)));
   const summary = {
-    results, unassigned: outcome.unassigned.map((u) => u.id), paid_rlusd: paid.toFixed(2), nodes_used: [...new Set(outcome.results.map((r) => r.provider))],
+    run_id: run.id, status: 'done', results, unassigned: outcome.unassigned.map((u) => u.id), paid_rlusd: paid.toFixed(2), nodes_used: [...new Set(outcome.results.map((r) => r.provider))],
     verified_on_chain: results.filter((r) => r.verdict === 'pass').length, nodes_caught_cheating: caught.map((c) => c.provider),
-    agent_balance_change_rlusd: refunded.toFixed(3), explorer: EXPLORER, dashboard: `${COORD}/`,
+    agent_balance_change_rlusd: Number(fmt(outcome.endBalance - outcome.startBalance)).toFixed(3), explorer: EXPLORER, dashboard: `${COORD}/`,
   };
   const lines = results.map((r) => `${r.id} on ${r.node}: ${r.verdict}${r.usable ? '' : ' (NOT USABLE)'}, exit ${r.exit_code}\n${(r.output || '').trimEnd().split('\n').map((l) => '  > ' + l).join('\n')}`);
   if (summary.unassigned.length) lines.push(`not completed: ${summary.unassigned.join(', ')}`);
   lines.push(`paid ${summary.paid_rlusd} RLUSD over AP4M x402 to ${summary.nodes_used.join(', ')}; ${summary.verified_on_chain} verified on-chain${caught.length ? `; caught cheating: ${summary.nodes_caught_cheating.join(', ')} (bond slashed, this agent refunded)` : ''}`);
-  return { content: [{ type: 'text', text: lines.join('\n\n') }], structuredContent: summary, isError: results.length === 0 };
+  return { text: lines.join('\n\n'), summary };
+}
+
+server.registerTool('gradewire_wait', {
+  title: 'Wait for a Gradewire run',
+  description: 'Follows a run started by gradewire_run. Blocks up to wait_s (default 45 s, max 50) and returns the progress lines that are new since your last call (payments, verdicts, cheaters caught, reroutes, nodes returning). When the run is done it also returns the results; keep calling until status is "done" or "failed".',
+  inputSchema: { run_id: z.string(), wait_s: z.number().int().min(1).max(50).optional() },
+}, async ({ run_id, wait_s = 45 }) => {
+  const run = runs.get(run_id);
+  if (!run) return { content: [{ type: 'text', text: `unknown run ${run_id}` }], isError: true };
+  const since = run.lines.length;
+  const deadline = Date.now() + wait_s * 1000;
+  while (run.status === 'running' && Date.now() < deadline) await new Promise((r) => setTimeout(r, 1000));
+  const fresh = run.lines.slice(since);
+  const elapsed = Math.round((Date.now() - run.started) / 1000);
+  if (run.status === 'done') {
+    const { text, summary } = summarize(run);
+    return { content: [{ type: 'text', text: `${fresh.join('\n')}\n\nrun ${run.id} done after ${elapsed} s.\n\n${text}` }], structuredContent: { ...summary, progress: fresh } };
+  }
+  if (run.status === 'failed') return { content: [{ type: 'text', text: `${fresh.join('\n')}\n\nrun ${run.id} failed after ${elapsed} s: ${run.error}` }], structuredContent: { run_id: run.id, status: 'failed', error: run.error, progress: fresh }, isError: true };
+  return { content: [{ type: 'text', text: `${fresh.join('\n') || '(no new events yet)'}\n\nrun ${run.id} still running after ${elapsed} s; call gradewire_wait again.` }], structuredContent: { run_id: run.id, status: 'running', elapsed_s: elapsed, progress: fresh } };
 });
 
 await server.connect(new StdioServerTransport());
