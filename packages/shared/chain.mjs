@@ -92,6 +92,16 @@ class ChunkedLogsProvider extends ethers.JsonRpcProvider {
     super(url, chainId, { staticNetwork: true });
     this.#span = span;
   }
+  // The public RPC is load-balanced: a block number read from one backend can be unknown to
+  // another for a few seconds, and ethers returns null. The AP4M merchant helper treats a null
+  // block as "finalized block is unavailable" and refuses the payment, so retry briefly.
+  async getBlock(tag, prefetchTxs) {
+    for (let attempt = 0; ; attempt++) {
+      const block = await super.getBlock(tag, prefetchTxs);
+      if (block || typeof toBlockNumber(tag) !== 'number' || attempt >= 6) return block;
+      await sleep(500);
+    }
+  }
   async getLogs(filter) {
     const from = toBlockNumber(filter?.fromBlock);
     const to = toBlockNumber(filter?.toBlock);
