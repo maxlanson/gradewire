@@ -182,12 +182,20 @@ async function main() {
   if (args['no-network']) return;
 
   // ── join the network: register, benchmark, bond, telemetry ───────────────
-  const [xrp, rl] = await Promise.all([provider.getBalance(identity.address), rlusd.balanceOf(identity.address)]);
+  const bondWei = ethers.parseUnits(BOND_RLUSD, 18);
+  const balances = async () => Promise.all([provider.getBalance(identity.address), rlusd.balanceOf(identity.address), registry.providers(identity.address)]);
+  let [xrp, rl, onchain] = await balances();
   console.log(`[node] wallet ${ethers.formatEther(xrp)} XRP, ${ethers.formatUnits(rl, 18)} RLUSD`);
-  if (xrp === 0n) console.warn('[node] no XRP for gas: run scripts/fund-nodes.mjs');
+  // A node that joins from another laptop has no funds yet: print the address and wait for the
+  // team to fund it (gas for registration and the RLUSD bond) instead of failing on the first tx.
+  for (let waited = 0; (xrp < ethers.parseEther('0.5') || (BigInt(onchain[2]) < bondWei && rl < bondWei - BigInt(onchain[2]))); waited++) {
+    if (waited % 6 === 0) console.log(`[node] waiting for funding of ${identity.address}: needs 3 XRP for gas and ${BOND_RLUSD} RLUSD for the bond\n[node]   on the team laptop: node --env-file=.env scripts/fund-nodes.mjs --address ${identity.address}`);
+    await new Promise((r) => setTimeout(r, 5000));
+    [xrp, rl, onchain] = await balances();
+  }
 
   const reg = await withRetry('register', () => postJson(`${COORDINATOR_URL}/providers/register`, { address: identity.address, endpoint: PUBLIC_URL, specs: specs(), price_rlusd: PRICE_RLUSD, label: LABEL }));
-  let onchain = await registry.providers(identity.address);
+  onchain = await registry.providers(identity.address);
   if (STATUS[Number(onchain[1])] === 'suspended') throw new Error('this identity is suspended on-chain (slashed); use a new state directory');
   if (STATUS[Number(onchain[1])] === 'none') {
     const tx = await registry.connect(wallet).register(PUBLIC_URL);
@@ -205,7 +213,6 @@ async function main() {
   const bench = await withRetry('benchmark', () => postJson(`${COORDINATOR_URL}/providers/${identity.address}/benchmark`, { results }));
   if (!bench.pass) throw new Error('benchmark failed');
   console.log(`[node] benchmark passed in ${Date.now() - t0}ms, attested ${bench.attest_tx}`);
-  const bondWei = ethers.parseUnits(BOND_RLUSD, 18);
   onchain = await registry.providers(identity.address);
   if (BigInt(onchain[2]) < bondWei) {
     const need = bondWei - BigInt(onchain[2]);

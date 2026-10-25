@@ -71,6 +71,8 @@ scripts/trainer.sh --jobs 9                        # second workload: RL reward 
 scripts/demo-down.sh
 ```
 
+**Nodes on other laptops:** `scripts/tunnel.sh 4500` on the team laptop, then on any Mac with Docker: `scripts/join.sh --coordinator https://<tunnel> --label "Node Sam"`; fund the address it prints with `scripts/fund-nodes.mjs --address 0x…`. Runbook: `docs/JOIN.md`.
+
 ### Ask it something
 
 ```bash

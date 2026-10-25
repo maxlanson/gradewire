@@ -111,6 +111,8 @@
   .ev:last-child { border-bottom: 0; }
   .ev .t { color: var(--ink-3); font-size: 12px; }
   .ev .who { font-weight: 600; margin-right: 6px; white-space: nowrap; }
+  .ev .who.sys { font-weight: 500; font-style: italic; color: var(--ink-2); }
+  .dot.ring { background: transparent !important; border: 2px solid var(--ring, var(--ink-3)); width: 9px; height: 9px; }
   .ev .what { overflow-wrap: anywhere; }
   .ev .m { color: var(--ink-2); }
   .ev .money { color: var(--money); font-weight: 600; font-style: normal; }
@@ -120,8 +122,10 @@
   .ev.fail .what { font-weight: 600; }
   .ev.slash { border-left-color: var(--fail); background: var(--fail-wash); }
   .ev.slash .money { color: var(--fail); }
-  .ev.new { animation: arrive 900ms ease-out; }
-  @keyframes arrive { from { background: var(--money-wash); } to { } }
+  .ev.new { animation: arrive 1200ms ease-out; }
+  .ev.new.fail, .ev.new.slash { animation: arrive-bad 1200ms ease-out; }
+  @keyframes arrive { from { background: var(--money-wash); } }
+  @keyframes arrive-bad { from { background: var(--fail); color: #fff; } }
   @media (prefers-reduced-motion: reduce) { .ev.new { animation: none; } }
 
   footer { display: flex; gap: 18px; flex-wrap: wrap; color: var(--ink-3); font-size: 12px; padding: 8px 28px 10px; }
@@ -226,7 +230,7 @@ function renderBudgets() {
 }
 
 function render() {
-  const providers = [...state.providers.values()];
+  const providers = [...state.providers.values()].sort((a, b) => String(a.label || a.address).localeCompare(String(b.label || b.address)));
   const jobs = [...state.jobs.values()].sort((a, b) => b.created_at - a.created_at);
   const paid = [...state.payments.values()].reduce((a, p) => a + (rlusd(p.amount_rlusd, p.amount_wei) || 0), 0);
   const verified = jobs.filter((j) => j.verdict === 'pass' || j.verdict === 'fail').length;
@@ -248,15 +252,20 @@ function render() {
     return `<tr><td class="mono">${short(j.id)}</td><td><span class="dot" style="background:${colorOf(j.provider)}"></span>${label(j.provider)}</td><td class="r">${price != null ? `${price.toFixed(2)} ${txLink(j.paid_tx, 'tx')}` : '—'}</td><td>${check} ${txLink(j.verdict_tx, 'tx')} ${j.slash_tx ? txLink(j.slash_tx, 'slash') : ''} ${j.anchor_tx ? `<a class="mono" href="https://testnet.xrpl.org/transactions/${j.anchor_tx}" target="_blank" rel="noopener">XRPL</a>` : ''}</td></tr>`;
   }).join('') || '<tr><td colspan="4" class="empty">No jobs yet.</td></tr>';
   $('feedn').textContent = state.feed.length ? `${state.feed.length} events` : '';
-  $('feed').innerHTML = state.feed.slice(0, 80).map((e) => `<div class="ev ${e.cls || ''}"><span class="t">${hhmmss(e.at)}</span><span class="what"><span class="who"><span class="dot" style="background:${colorOf(e.provider)}"></span>${e.who}</span>${e.what}</span><span class="tx">${txLink(e.tx)}</span></div>`).join('') || '<div class="empty">Waiting for the first job.</div>';
+  $('feed').innerHTML = state.feed.slice(0, 80).map((e) => {
+    const fresh = e.fresh; e.fresh = false; // animate a line once, not on every re-render
+    const who = e.sys ? `<span class="who sys"><span class="dot ring" style="--ring:${colorOf(e.provider)}"></span>${e.who}</span>` : `<span class="who"><span class="dot" style="background:${colorOf(e.provider)}"></span>${e.who}</span>`;
+    return `<div class="ev ${e.cls || ''}${fresh ? ' new' : ''}"><span class="t">${hhmmss(e.at)}</span><span class="what">${who}${e.what}</span><span class="tx">${txLink(e.tx)}</span></div>`;
+  }).join('') || '<div class="empty">Waiting for the first job.</div>';
   renderBudgets();
 }
 
-function push(e) { state.feed.unshift({ ...e, cls: `${e.cls || ''} new` }); }
+function push(e) { state.feed.unshift({ ...e, fresh: true }); }
 function applySnapshot(s) {
   state.explorer = s.explorer; state.deployment = s.deployment || {}; state.sampling = s.sampling_rate;
   $('links').innerHTML = `<span>Contracts on XRPL EVM Testnet:</span><a href="${s.explorer}/address/${s.deployment.registry}" target="_blank" rel="noopener">Registry (bonds, slashing)</a><a href="${s.explorer}/address/${s.deployment.serviceManager}" target="_blank" rel="noopener">ServiceManager (verdicts)</a><a href="${s.explorer}/address/${s.deployment.paymentLedger}" target="_blank" rel="noopener">AP4M PaymentLedger (vouchers)</a><span class="note">Trust is earned per verified job: 1 job at a time for a new node, +1 per clean check (max 3), ${Math.round(s.sampling_rate * 100)}% re-run after 3 clean checks.</span>`;
   state.providers = new Map(s.providers.map((p) => [p.address, p]));
+  for (const p of [...s.providers].sort((a, b) => String(a.label || a.address).localeCompare(String(b.label || b.address)))) colorOf(p.address); // stable colours: Node A blue, B orange, C violet
   state.jobs = new Map(s.jobs.map((j) => [j.id, j]));
   state.payments = new Map(s.payments.map((p) => [`${p.tx}:${p.log_index}`, p]));
   state.budgets = new Map((s.budgets || []).map((b) => [b.agent, b]));
@@ -270,7 +279,7 @@ function applySnapshot(s) {
   const byPaidTx = new Map(s.jobs.filter((j) => j.paid_tx).map((j) => [j.paid_tx.toLowerCase(), j]));
   for (const j of s.jobs) feed.push({ at: j.created_at, provider: j.provider, who: label(j.provider), what: `ran <span class="mono">${short(j.id)}</span> <span class="m">${j.sampled ? '· picked for re-run' : '· not sampled this time'}</span>`, tx: j.paid_tx });
   for (const p of s.payments) { const j = byPaidTx.get((p.tx || '').toLowerCase()); const prov = j?.provider || (p.submitter || '').toLowerCase(); feed.push({ at: p.at, provider: prov, who: label(prov), cls: 'ok', what: `got paid ${money(rlusd(p.amount_rlusd, p.amount_wei) || 0)} <span class="m">· voucher redeemed on-chain</span>`, tx: p.tx }); }
-  for (const v of s.verifications) { const t = state.tasks.get(v.task_id); feed.push({ at: v.at, provider: t?.provider, who: verifierName(v.operator), what: `re-ran ${label(t?.provider)}'s job: <b>${v.matched ? 'same hash' : 'different hash'}</b>`, tx: v.tx }); }
+  for (const v of s.verifications) { const t = state.tasks.get(v.task_id); feed.push({ at: v.at, provider: t?.provider, who: verifierName(v.operator), sys: true, what: `re-ran ${label(t?.provider)}'s job: <b>${v.matched ? 'same hash' : 'different hash'}</b>`, tx: v.tx }); }
   for (const t of state.tasks.values()) { if (t.pass == null || !t.verdict_tx) continue; const at = Math.max(0, ...s.verifications.filter((v) => v.task_id === t.task_id).map((v) => v.at || 0)); if (!at) continue; feed.push({ at: at + 1, provider: t.provider, who: label(t.provider), cls: t.pass ? 'ok' : 'fail', what: t.pass ? 'verified: verdict posted on-chain' : 'FAILED verification <span class="m">· result did not reproduce · payments to this node stop</span>', tx: t.verdict_tx }); }
   for (const i of s.incidents) { if (i.kind === 'slash') { const m = i.detail.match(/([\d.]+) RLUSD refunded/); feed.push({ at: i.at, provider: i.provider, who: label(i.provider), cls: 'slash', what: `bond slashed: ${money(m ? m[1] : 0, 3)} refunded to the agent`, tx: i.tx }); } else if (i.kind === 'bond') feed.push({ at: i.at, provider: i.provider, who: label(i.provider), what: i.detail, tx: i.tx }); }
   state.feed = feed.filter((e) => e.at).sort((a, b) => b.at - a.at);
@@ -284,12 +293,12 @@ function handle(type, d) {
   }
   else if (type === 'payment') { state.payments.set(`${d.tx}:0`, d); push({ at: d.at, provider: d.provider, who: label(d.provider), cls: 'ok', what: `got paid ${money(d.amount_rlusd)} <span class="m">· voucher redeemed on-chain${d.source === 'quicknode' ? ' · via Quicknode Stream' : ''}</span>`, tx: d.tx }); }
   else if (type === 'job') { state.jobs.set(d.job_id, { id: d.job_id, provider: d.provider, reward: d.reward, price_rlusd: d.price_rlusd, paid_tx: d.paid_tx, sampled: d.sampled, verdict: d.verdict, created_at: d.at }); push({ at: d.at, provider: d.provider, who: label(d.provider), what: `ran <span class="mono">${short(d.job_id)}</span> <span class="m">${d.sampled ? '· picked for re-run' : '· not sampled this time'}</span>`, tx: d.paid_tx }); }
-  else if (type === 'task') { state.tasks.set(d.task_id, { task_id: d.task_id, job_id: d.job_id, provider: d.provider, tx: d.tx, pass: null, responses: {} }); const j = state.jobs.get(d.job_id); if (j) j.task_id = d.task_id; push({ at: d.at, provider: d.provider, who: 'Coordinator', what: `asked 3 verifiers to re-run ${label(d.provider)}'s job`, tx: d.tx }); }
-  else if (type === 'response') { const t = state.tasks.get(d.task_id); if (t) t.responses[d.operator.toLowerCase()] = { matched: d.matched }; push({ at: d.at, provider: d.provider, who: verifierName(d.operator), what: `re-ran ${label(d.provider)}'s job: <b>${d.matched ? 'same hash' : 'different hash'}</b>`, tx: d.tx }); }
+  else if (type === 'task') { state.tasks.set(d.task_id, { task_id: d.task_id, job_id: d.job_id, provider: d.provider, tx: d.tx, pass: null, responses: {} }); const j = state.jobs.get(d.job_id); if (j) j.task_id = d.task_id; push({ at: d.at, provider: d.provider, who: 'Coordinator', sys: true, what: `asked 3 verifiers to re-run ${label(d.provider)}'s job`, tx: d.tx }); }
+  else if (type === 'response') { const t = state.tasks.get(d.task_id); if (t) t.responses[d.operator.toLowerCase()] = { matched: d.matched }; push({ at: d.at, provider: d.provider, who: verifierName(d.operator), sys: true, what: `re-ran ${label(d.provider)}'s job: <b>${d.matched ? 'same hash' : 'different hash'}</b>`, tx: d.tx }); }
   else if (type === 'verdict') { const j = state.jobs.get(d.job_id); if (j) { j.verdict = d.pass === true ? 'pass' : d.pass === false ? 'fail' : 'error'; j.verdict_tx = d.tx; } const t = state.tasks.get(d.task_id); if (t) { t.pass = d.pass; t.verdict_tx = d.tx; } push({ at: d.at, provider: d.provider, who: label(d.provider), cls: d.pass ? 'ok' : d.pass === false ? 'fail' : '', what: d.pass ? 'verified: verdict posted on-chain' : d.pass === false ? 'FAILED verification <span class="m">· result did not reproduce · payments to this node stop</span>' : `verification error <span class="m">${d.error || ''}</span>`, tx: d.tx }); }
   else if (type === 'slash') { state.refundTotal += Number(d.refund_rlusd); const j = state.jobs.get(d.job_id); if (j) j.slash_tx = d.tx; push({ at: d.at, provider: d.provider, who: label(d.provider), cls: 'slash', what: `bond slashed: ${money(d.refund_rlusd, 3)} refunded to the agent <span class="m">· ${Number(d.verifier_reward_rlusd).toFixed(3)} to verifiers · ${Number(d.treasury_rlusd).toFixed(3)} treasury</span>`, tx: d.tx }); }
   else if (type === 'bond') { push({ at: d.at, provider: d.provider, who: label(d.provider), what: d.withdrawn ? `withdrew bond with an approver signature <span class="m">(remaining ${Number(d.total_rlusd).toFixed(2)} RLUSD)</span>` : `posted a ${Number(d.total_rlusd).toFixed(2)} RLUSD bond`, tx: d.tx }); }
-  else if (type === 'anchor') { const j = state.jobs.get(d.job_id); if (j) j.anchor_tx = d.xrpl_tx; push({ at: d.at, provider: d.provider, who: 'Coordinator', what: `anchored the verdict on the XRP Ledger <a class="mono" href="${d.url}" target="_blank" rel="noopener">${short(d.xrpl_tx)}</a>` }); }
+  else if (type === 'anchor') { const j = state.jobs.get(d.job_id); if (j) j.anchor_tx = d.xrpl_tx; push({ at: d.at, provider: d.provider, who: 'Coordinator', sys: true, what: `anchored the verdict on the XRP Ledger <a class="mono" href="${d.url}" target="_blank" rel="noopener">${short(d.xrpl_tx)}</a>` }); }
   else if (type === 'budget') { state.budgets.set(d.agent, d); }
   render();
 }
