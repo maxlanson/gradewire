@@ -6,140 +6,158 @@
 <title>Gradewire Live</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ccircle cx=%278%27 cy=%278%27 r=%277%27 fill=%27%232f6fe4%27/%3E%3C/svg%3E">
 <style>
+  /* One theme: a dark window floating on a grainy warm-to-sage gradient. Colours are deliberately
+     muted; the only saturated things are money (mint) and bad news (red). */
   :root {
-    color-scheme: light;
-    --paper: #f4f6f4; --panel: #ffffff; --panel-2: #eef1ee; --rule: #dfe3e0;
-    --ink: #151a21; --ink-2: #4c5563; --ink-3: #8b93a0;
-    --money: #15834a; --fail: #c9342b; --warn: #b97a00; --good: #15834a;
-    --fail-wash: #fbeceb; --money-wash: #e6f4ec;
-    --n1: #2f6fe4; --n2: #e3672b; --n3: #7a4de8; --n4: #b7920b; --n5: #d14e8a;
-    --track: #dde3ea;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      color-scheme: dark;
-      --paper: #111417; --panel: #181c21; --panel-2: #1f242b; --rule: #2a3039;
-      --ink: #eef0f2; --ink-2: #b4bac4; --ink-3: #7d8591;
-      --money: #3fbf78; --fail: #ef6a60; --warn: #e0a52a; --good: #3fbf78;
-      --fail-wash: #3a1f1d; --money-wash: #173126;
-      --n1: #5b8ff0; --n2: #f0804a; --n3: #9b78f2; --n4: #d4ad2a; --n5: #e46ba3;
-      --track: #2a3039;
-    }
-  }
-  :root[data-theme="dark"] {
     color-scheme: dark;
-    --paper: #111417; --panel: #181c21; --panel-2: #1f242b; --rule: #2a3039;
-    --ink: #eef0f2; --ink-2: #b4bac4; --ink-3: #7d8591;
-    --money: #3fbf78; --fail: #ef6a60; --warn: #e0a52a; --good: #3fbf78;
-    --fail-wash: #3a1f1d; --money-wash: #173126;
-    --n1: #5b8ff0; --n2: #f0804a; --n3: #9b78f2; --n4: #d4ad2a; --n5: #e46ba3;
-    --track: #2a3039;
+    --win: #141618; --panel: #1b1e21; --panel-2: #202428; --rule: rgba(255,255,255,0.07); --rule-2: rgba(255,255,255,0.12);
+    --ink: #f0f0ec; --ink-2: #b9bbb6; --ink-3: #7f837f;
+    --money: #8fd9b6; --fail: #ec7b70; --warn: #e3b35a; --good: #8fd9b6;
+    --fail-wash: rgba(236,123,112,0.10); --money-wash: rgba(143,217,182,0.10); --warn-wash: rgba(227,179,90,0.10);
+    --n1: #7aa7ff; --n2: #ffa36b; --n3: #c3a1ff; --n4: #e7d36a; --n5: #ff8fc2;
+    --track: rgba(255,255,255,0.09);
   }
   * { box-sizing: border-box; min-width: 0; }
   html, body { height: 100%; }
   body {
-    margin: 0; background: var(--paper); color: var(--ink);
-    font: 14px/1.4 "Avenir Next", "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
-    display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100vh; overflow: hidden;
+    margin: 0; color: var(--ink);
+    font: 14px/1.45 -apple-system, "SF Pro Text", "Helvetica Neue", "IBM Plex Sans", system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
+    background: #231d19;
+    background-image:
+      radial-gradient(55% 75% at 6% 95%, rgba(176, 82, 34, 0.95) 0%, rgba(176, 82, 34, 0) 62%),
+      radial-gradient(42% 55% at 14% 2%, rgba(150, 104, 40, 0.85) 0%, rgba(150, 104, 40, 0) 60%),
+      radial-gradient(48% 70% at 90% 6%, rgba(118, 156, 128, 0.90) 0%, rgba(118, 156, 128, 0) 62%),
+      radial-gradient(38% 55% at 100% 100%, rgba(84, 120, 106, 0.70) 0%, rgba(84, 120, 106, 0) 60%),
+      radial-gradient(30% 40% at 50% 0%, rgba(120, 110, 90, 0.35) 0%, rgba(120, 110, 90, 0) 60%),
+      linear-gradient(180deg, #332a25 0%, #221d1a 55%, #1a1715 100%);
+    height: 100vh; overflow: hidden; padding: 44px 40px 30px; display: grid;
   }
-  a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--rule); }
-  a:hover, a:focus-visible { border-color: var(--ink-2); outline: none; }
+  body::before { /* film grain */
+    content: ""; position: fixed; inset: 0; pointer-events: none; opacity: 0.22; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .app {
+    position: relative; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-height: 0;
+    background: var(--win); border: 1px solid rgba(255,255,255,0.10); border-radius: 14px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.55), 0 2px 0 rgba(255,255,255,0.03) inset;
+  }
+  a { color: inherit; text-decoration: none; }
+  a:hover, a:focus-visible { color: var(--ink); outline: none; }
   a:focus-visible { outline: 2px solid var(--n1); outline-offset: 2px; }
   .mono { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12px; color: var(--ink-2); }
+  a.mono { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 1px 7px; color: var(--ink-2); }
+  a.mono:hover { background: rgba(255,255,255,0.10); color: var(--ink); }
 
-  header { display: flex; align-items: baseline; gap: 14px; padding: 14px 28px 0; }
-  h1 { font: 600 22px/1 "Avenir Next Condensed", "Avenir Next", "Helvetica Neue", sans-serif; letter-spacing: 0.01em; margin: 0; text-transform: uppercase; }
-  header .tag { color: var(--ink-2); }
+  header { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--rule); color: var(--ink-2); font-size: 14px; }
+  header svg { width: 16px; height: 16px; color: var(--ink-3); }
+  header .crumb { color: var(--ink-3); }
+  header .sep { color: var(--ink-3); padding: 0 2px; }
+  h1 { font-size: 14px; font-weight: 500; margin: 0; color: var(--ink); letter-spacing: 0; }
+  header .tag { color: var(--ink-3); margin-left: 6px; }
   .live { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; color: var(--ink-2); font-size: 12px; }
-  .live i { width: 9px; height: 9px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px var(--money-wash); }
+  .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px var(--money-wash); }
   .live.off i { background: var(--fail); box-shadow: 0 0 0 3px var(--fail-wash); }
 
-  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 8px 28px 14px; gap: 0 28px; }
-  .stat { display: flex; align-items: baseline; gap: 12px; padding: 6px 0 8px; border-bottom: 2px solid var(--ink); }
-  .stat b { font: 600 54px/0.95 "Avenir Next Condensed", "Avenir Next", "Helvetica Neue", sans-serif; letter-spacing: -0.01em; }
-  .stat b small { font-size: 22px; font-weight: 500; margin-left: 4px; color: var(--ink-2); }
-  .stat span { color: var(--ink-2); font-size: 13px; line-height: 1.3; max-width: 24ch; }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 22px 28px 8px; gap: 0 28px; }
+  .stat { display: flex; align-items: baseline; gap: 12px; padding: 4px 0 14px; border-bottom: 1px solid var(--rule); }
+  .stat b { font-size: 40px; line-height: 1; font-weight: 600; letter-spacing: -0.02em; color: var(--ink); }
+  .stat b small { font-size: 16px; font-weight: 500; margin-left: 5px; color: var(--ink-2); letter-spacing: 0; }
+  .stat span { color: var(--ink-2); font-size: 13px; line-height: 1.35; max-width: 30ch; }
   .stat.money b { color: var(--money); }
   .stat.caught.hot b { color: var(--fail); }
-  .stat.caught.hot { border-color: var(--fail); }
 
-  .board { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; padding: 0 28px; min-height: 0; }
-  .col { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 16px; min-height: 0; }
-  .panel { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; }
-  .panel h2 { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 0; padding: 9px 14px; border-bottom: 1px solid var(--rule); display: flex; gap: 10px; align-items: baseline; }
-  .panel h2 .n { color: var(--ink-3); font-weight: 500; }
+  .board { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; padding: 16px 28px 0; min-height: 0; }
+  .col { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 14px; min-height: 0; }
+  .panel { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-radius: 10px; border: 1px solid var(--rule); }
+  .panel h2 { font-size: 13px; font-weight: 600; color: var(--ink); margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--rule); display: flex; gap: 10px; align-items: baseline; }
+  .panel h2 .n { color: var(--ink-3); font-weight: 400; }
   .panel .body { overflow: auto; min-height: 0; }
-  .empty { color: var(--ink-3); padding: 14px; }
+  .empty { color: var(--ink-3); padding: 14px; display: grid; gap: 10px; }
+  .empty::before, .empty::after { content: ""; display: block; height: 14px; border-radius: 7px; background: var(--panel-2); }
+  .empty::after { width: 60%; }
 
   table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; color: var(--ink-3); font-weight: 500; font-size: 12px; padding: 6px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
-  td { padding: 7px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; white-space: nowrap; }
+  th { text-align: left; color: var(--ink-3); font-weight: 500; font-size: 12px; padding: 7px 12px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--rule); vertical-align: middle; white-space: nowrap; color: var(--ink-2); }
+  td.node, td b { color: var(--ink); }
   tr:last-child td { border-bottom: 0; }
   td.r, th.r { text-align: right; }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
-  .node { font-weight: 600; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; }
+  .node { font-weight: 600; color: var(--ink); }
   .node .mono { font-weight: 400; margin-left: 8px; }
-  @media (max-width: 1700px) { td.node .mono { display: none; } }
-  @media (max-width: 1400px) { .trust .m { display: none; } footer .note { display: none; } }
+  @media (max-width: 1800px) { td.node .mono { display: none; } }
+  @media (max-width: 1600px) { .trust .m { display: none; } }
+  .col > .panel:first-child .body { max-height: 38vh; }
+  @media (max-width: 1400px) {
+    footer .note { display: none; } .bmeta { display: none; }
+    #providers td:nth-child(5), #providers ~ thead th:nth-child(5), .col > .panel:first-child th:nth-child(5) { display: none; } /* bond column */
+    body { padding: 24px 24px 18px; }
+    .stats { padding: 14px 24px 4px; } .stat b { font-size: 34px; } .stat { padding-bottom: 10px; }
+    .board { padding: 12px 24px 0; gap: 14px; } .col { gap: 10px; }
+    td { padding: 6px 12px; } th { padding: 5px 12px; } .brow { padding: 7px 12px; } .ev { padding: 6px 12px; }
+    footer { margin-top: 10px; padding: 8px 24px 10px; }
+  }
   .status { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   .status svg { width: 12px; height: 12px; }
   .st-good { color: var(--good); } .st-warn { color: var(--warn); } .st-bad { color: var(--fail); } .st-muted { color: var(--ink-3); }
   .status .t { color: var(--ink); }
-  .meter { display: inline-block; width: 64px; height: 6px; background: var(--track); border-radius: 3px; vertical-align: middle; margin-right: 7px; overflow: hidden; }
+  .meter { display: inline-block; width: 60px; height: 5px; background: var(--track); border-radius: 3px; vertical-align: middle; margin-right: 7px; overflow: hidden; }
   .meter b { display: block; height: 100%; background: var(--n1); border-radius: 3px; }
   .meter.bad b { background: var(--fail); }
   .ops { display: inline-flex; gap: 3px; margin-right: 6px; vertical-align: -1px; }
   .ops i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; background: var(--track); }
   .ops i.m { background: var(--good); } .ops i.x { background: var(--fail); }
   .fail-t { color: var(--fail); font-weight: 600; }
-  .trust { white-space: nowrap; }
+  .trust { white-space: nowrap; color: var(--ink); }
   .trust .m, td .m { color: var(--ink-2); }
 
-  .brow { display: grid; grid-template-columns: minmax(90px, auto) minmax(80px, 1fr) auto auto; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--rule); align-items: center; }
+  .brow { display: grid; grid-template-columns: minmax(90px, auto) minmax(80px, 1fr) auto auto; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--rule); align-items: center; }
   .brow:last-child { border-bottom: 0; }
-  .brow .bar { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
-  .brow .bar b { display: block; height: 100%; background: var(--money); border-radius: 4px; }
+  .brow .bar { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
+  .brow .bar b { display: block; height: 100%; background: var(--money); border-radius: 3px; }
   .brow .bar.low b { background: var(--warn); }
   .brow .amt { color: var(--ink-2); white-space: nowrap; }
   .brow .amt b { color: var(--ink); font-weight: 600; }
-  .bmeta { color: var(--ink-2); font-size: 12px; padding: 7px 12px; border-top: 1px solid var(--rule); background: var(--panel-2); border-radius: 0 0 8px 8px; }
+  .bmeta { color: var(--ink-2); font-size: 12px; padding: 8px 12px; border-top: 1px solid var(--rule); background: var(--panel-2); border-radius: 0 0 10px 10px; }
   .bmeta b { color: var(--ink); font-weight: 600; }
 
   .feed { display: block; }
-  .ev { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--rule); align-items: baseline; border-left: 3px solid transparent; }
+  .ev { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--rule); align-items: baseline; border-left: 3px solid transparent; color: var(--ink-2); }
   .ev:last-child { border-bottom: 0; }
   .ev .t { color: var(--ink-3); font-size: 12px; }
-  .ev .who { font-weight: 600; margin-right: 6px; white-space: nowrap; }
+  .ev .who { font-weight: 600; margin-right: 6px; white-space: nowrap; color: var(--ink); }
   .ev .who.sys { font-weight: 500; font-style: italic; color: var(--ink-2); }
   .dot.ring { background: transparent !important; border: 2px solid var(--ring, var(--ink-3)); width: 9px; height: 9px; }
   .ev .what { overflow-wrap: anywhere; }
-  .ev .m { color: var(--ink-2); }
+  .ev .what b { color: var(--ink); }
+  .ev .m { color: var(--ink-3); }
   .ev .money { color: var(--money); font-weight: 600; font-style: normal; }
   .ev .tx { white-space: nowrap; }
   .ev.ok { border-left-color: var(--good); }
   .ev.fail { border-left-color: var(--fail); background: var(--fail-wash); }
-  .ev.fail .what { font-weight: 600; }
+  .ev.fail .what { font-weight: 600; color: var(--ink); }
   .ev.slash { border-left-color: var(--fail); background: var(--fail-wash); }
-  .ev.warn { border-left-color: var(--warn); }
-  .ev.warn .what { font-weight: 600; }
   .ev.slash .money { color: var(--fail); }
+  .ev.warn { border-left-color: var(--warn); background: var(--warn-wash); }
+  .ev.warn .what { font-weight: 600; color: var(--ink); }
   .ev.new { animation: arrive 1200ms ease-out; }
   .ev.new.fail, .ev.new.slash { animation: arrive-bad 1200ms ease-out; }
-  @keyframes arrive { from { background: var(--money-wash); } }
-  @keyframes arrive-bad { from { background: var(--fail); color: #fff; } }
+  @keyframes arrive { from { background: rgba(143,217,182,0.22); } }
+  @keyframes arrive-bad { from { background: rgba(236,123,112,0.45); } }
   @media (prefers-reduced-motion: reduce) { .ev.new { animation: none; } }
 
-  footer { display: flex; gap: 18px; flex-wrap: wrap; color: var(--ink-3); font-size: 12px; padding: 8px 28px 10px; }
+  footer { display: flex; gap: 18px; flex-wrap: wrap; color: var(--ink-3); font-size: 12px; padding: 10px 28px 12px; border-top: 1px solid var(--rule); margin-top: 14px; }
   footer a { color: var(--ink-2); }
 
   @media (max-width: 980px) {
-    body { height: auto; overflow: auto; display: block; }
-    header { flex-wrap: wrap; gap: 6px 14px; }
-    header .tag { flex-basis: 100%; order: 3; }
-    header, .stats, .board, footer { padding-left: 16px; padding-right: 16px; }
+    body { height: auto; overflow: auto; display: block; padding: 10px; }
+    .app { display: block; }
+    header { flex-wrap: wrap; gap: 6px 10px; }
+    header .tag { flex-basis: 100%; order: 3; margin: 0; }
+    .stats, .board, footer { padding-left: 14px; padding-right: 14px; }
     .stats { grid-template-columns: 1fr; gap: 0; }
-    .stat b { font-size: 40px; }
+    .stat b { font-size: 32px; }
     .board { grid-template-columns: 1fr; }
     .col { display: grid; }
     .panel .body { max-height: 420px; }
@@ -151,9 +169,11 @@
 </style>
 </head>
 <body>
+<div class="app">
 <header>
-  <h1>Gradewire</h1>
-  <span class="tag">AI agents buying verified compute, paid per job in RLUSD over Mastercard AP4M on XRPL EVM</span>
+  <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 7h6M5 10h4"/></svg>
+  <span class="crumb">Gradewire</span><span class="sep">›</span><h1>Live network</h1>
+  <span class="tag">agents buying verified compute, paid per job in RLUSD over Mastercard AP4M on XRPL EVM</span>
   <span class="live" id="live"><i></i><span>connecting</span></span>
 </header>
 <div class="stats" id="stats"></div>
@@ -178,6 +198,7 @@
   </div>
 </div>
 <footer id="links"></footer>
+</div>
 <script>
 const $ = (id) => document.getElementById(id);
 const state = { providers: new Map(), jobs: new Map(), tasks: new Map(), payments: new Map(), budgets: new Map(), feed: [], explorer: '', refundTotal: 0, deployment: {}, sampling: 0.5 };
@@ -206,9 +227,9 @@ const opsFor = (t) => `<span class="ops">${(state.deployment.operators || []).ma
 
 function renderStats(jobs, paid, verified, sampled, caught) {
   $('stats').innerHTML = `
-    <div class="stat money"><b>${paid.toFixed(2)}<small>RLUSD</small></b><span>paid to nodes for ${jobs} job${jobs === 1 ? '' : 's'}, one HTTP 402 each</span></div>
-    <div class="stat"><b>${verified}<small>of ${sampled}</small></b><span>sampled jobs re-run by 3 verifiers, verdict on-chain</span></div>
-    <div class="stat caught${caught ? ' hot' : ''}"><b>${caught}</b><span>${caught ? `node${caught === 1 ? '' : 's'} caught cheating, bond slashed, ${state.refundTotal.toFixed(3)} RLUSD refunded to the agent` : 'nodes caught cheating: a failed re-run slashes the bond and refunds the agent'}</span></div>`;
+    <div class="stat money"><b>${paid.toFixed(2)}<small>RLUSD</small></b><span>paid to nodes for ${jobs} job${jobs === 1 ? '' : 's'}, one 402 each</span></div>
+    <div class="stat"><b>${verified}<small>of ${sampled}</small></b><span>sampled jobs re-run by 3 verifiers, verdicts on-chain</span></div>
+    <div class="stat caught${caught ? ' hot' : ''}"><b>${caught}</b><span>${caught ? `node${caught === 1 ? '' : 's'} caught cheating, bond slashed, ${state.refundTotal.toFixed(3)} RLUSD refunded` : 'nodes caught cheating: a failed re-run slashes the bond, refunds the agent'}</span></div>`;
 }
 
 function renderBudgets() {
