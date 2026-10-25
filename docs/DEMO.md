@@ -51,6 +51,8 @@ Narrate while it runs:
 - the agent's RLUSD balance ticks up on the explorer (the refund; the agent also prints the before/after balance at the end);
 - Node C's score drops to 0 and its status to **suspended**; it can never re-register with that key.
 
+**The unreliable node (optional, 20 s, needs a teammate's laptop joined via `scripts/join.sh`).** While the parts are running, the teammate closes their laptop. Within seconds the agent prints `[reroute] part-N leaves Node <name> (node unreachable)` and an honest node picks the part up; about 20 s later the feed shows "went offline: no heartbeat … its jobs are rerouted, reliability drops, no slash" and the node's row turns **offline**. Say it out loud: a dead node is a health failure, not fraud. It is not slashed, it is simply not paid for work it did not finish and it stops being offered work until it is back and its reliability recovers. Opening the laptop again shows "back online".
+
 Then the last verdict lands and the agent prints the answer, composed only from the verified outputs: the prime count and the 100,000th prime, with the node and verdict for each part.
 
 **2:35 Why it matters (25 s).** "Other networks punish cheaters after you've paid. Here verification decides whether money moves at all, and nodes are paid in dollars, not tokens. The same network grades reinforcement-learning rollouts as a batch workload. Built on XRPL EVM with Mastercard AP4M, verdicts anchored on the XRP Ledger, bonds released only with an approver's signature."

@@ -27,9 +27,10 @@ import { loadX402Context } from '../ap4m/ap4m-x402.mjs';
 import { describeError, contracts, loadDeployment, makeProvider, STATUS } from '../shared/chain.mjs';
 import { buildResult, canonicalJson, parseJob, resultHash, resultSigningMessage, SANDBOX_IMAGE, SCRIPT_KIND } from '../shared/index.mjs';
 import { runJob } from './sandbox.mjs';
+import { createDisplay } from './display.mjs';
 import { createX402Resources, send } from './x402.mjs';
 
-const { values: args } = parseArgs({ options: { port: { type: 'string', default: '4401' }, cheat: { type: 'boolean', default: false }, label: { type: 'string' }, 'no-network': { type: 'boolean', default: false } } });
+const { values: args } = parseArgs({ options: { port: { type: 'string', default: '4401' }, cheat: { type: 'boolean', default: false }, label: { type: 'string' }, 'no-network': { type: 'boolean', default: false }, 'no-display': { type: 'boolean', default: false } } });
 const PORT = Number(args.port);
 const CHEAT = args.cheat;
 const LABEL = args.label || `node-${PORT}`;
@@ -67,6 +68,7 @@ function fakeResult(job) {
   return buildResult(job, { status: 'ok', exit_code: 0, tests });
 }
 
+async function getJson(url) { const res = await fetch(url); const data = await res.json(); if (!res.ok) throw new Error(`${url} failed (${res.status}): ${data.error}`); return data; }
 async function postJson(url, body) {
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const text = await res.text();
@@ -93,6 +95,7 @@ function specs() {
 async function main() {
   if (!MERCHANT_ID || !PAYOUT) throw new Error('set MERCHANT_ID and PAYOUT_ADDRESS');
   const identity = loadIdentity();
+  let display = createDisplay({ enabled: false });
   const context = await loadX402Context(AP4M_API_URL);
   const deployment = loadDeployment();
   const provider = makeProvider(deployment); // the x402 helper's VoucherRedeemed lookup needs chunked getLogs on Quicknode
@@ -119,6 +122,7 @@ async function main() {
         amount: priceWei,
         async produce({ transactionHash, agent }) {
           running++;
+          display.event('job-start', { id: job.job_id, price: PRICE_RLUSD });
           try {
             const t0 = Date.now();
             let result;
@@ -132,11 +136,12 @@ async function main() {
             const sig = await identity.signMessage(resultSigningMessage(job.job_id, hash));
             graded++;
             console.log(`[grade] ${job.job_id} ${result.status} reward=${result.reward} hash=${hash.slice(0, 12)} ${Date.now() - t0}ms paid=${transactionHash.slice(0, 12)}${CHEAT ? ' (CHEAT)' : ''}`);
+            display.event('job-done', { id: job.job_id, ms: Date.now() - t0, paid_tx: transactionHash, status: result.status, price: PRICE_RLUSD });
             if (!args['no-network']) {
               withRetry(`report ${job.job_id}`, () => postJson(`${COORDINATOR_URL}/results`, {
                 job_id: job.job_id, spec: job, spec_hash: result.spec_hash, result_hash: hash, sig, provider: identity.address,
                 buyer: agent, paid_tx: transactionHash, price_wei: priceWei, reward: result.reward, status: result.status,
-              })).then((r) => { if (r.sampled) console.log(`[report] ${job.job_id} sampled for verification`); })
+              })).then((r) => { display.event('job-reported', { id: job.job_id, sampled: !!r.sampled }); if (r.sampled) { console.log(`[report] ${job.job_id} sampled for verification`); watchVerdict(job.job_id); } })
                 .catch((e) => console.error(`[report] ${job.job_id}: ${e.message}`));
             }
             return { result, result_hash: hash, sig, provider: identity.address, paid_tx: transactionHash };
@@ -177,7 +182,26 @@ async function main() {
   server.listen(PORT, '127.0.0.1', () => {
     console.log(`[node] ${LABEL} ${identity.address} selling grades at ${PUBLIC_URL}/grade/{job_id} for ${PRICE_RLUSD} RLUSD${CHEAT ? '  ** CHEAT MODE **' : ''}`);
   });
-  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { server.close(); x402.close().finally(() => process.exit(0)); });
+  display = createDisplay({ label: LABEL, address: identity.address, publicUrl: PUBLIC_URL, price: PRICE_RLUSD, cheat: CHEAT, enabled: process.stdout.isTTY && !args['no-display'] });
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { display.stop(); server.close(); x402.close().finally(() => process.exit(0)); });
+
+  // For the panel: follow a sampled job until its verdict lands, and refresh this node's
+  // status, score and earned trust from the coordinator every few seconds.
+  async function watchVerdict(jobId) {
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      try {
+        const v = await getJson(`${COORDINATOR_URL}/jobs/${jobId}/verdict`);
+        if (v.verdict !== 'pending') { display.event('job-verdict', { id: jobId, verdict: v.verdict }); console.log(`[verdict] ${jobId}: ${v.verdict}${v.verdict === 'pass' ? ' (3 verifiers re-ran it, hashes match)' : v.verdict === 'fail' ? ' (result did not reproduce: bond slashed)' : ''}`); return; }
+      } catch { /* coordinator unreachable; try again */ }
+    }
+  }
+  async function refreshStatus() {
+    try {
+      const me = (await getJson(`${COORDINATOR_URL}/providers`)).providers.find((p) => p.address.toLowerCase() === identity.address.toLowerCase());
+      if (me) display.event('status', { status: me.status, bond: Number(me.bond_rlusd).toFixed(2), score: me.score, trust: me.trust });
+    } catch { /* keep the last known values */ }
+  }
 
   if (args['no-network']) return;
 
@@ -189,11 +213,13 @@ async function main() {
   // A node that joins from another laptop has no funds yet: print the address and wait for the
   // team to fund it (gas for registration and the RLUSD bond) instead of failing on the first tx.
   for (let waited = 0; (xrp < ethers.parseEther('0.5') || (BigInt(onchain[2]) < bondWei && rl < bondWei - BigInt(onchain[2]))); waited++) {
+    if (waited === 0) display.event('status', { status: 'waiting for funding', note: `send 3 XRP + ${BOND_RLUSD} RLUSD to ${identity.address} (team laptop: node --env-file=.env scripts/fund-nodes.mjs --address ${identity.address})` });
     if (waited % 6 === 0) console.log(`[node] waiting for funding of ${identity.address}: needs 3 XRP for gas and ${BOND_RLUSD} RLUSD for the bond\n[node]   on the team laptop: node --env-file=.env scripts/fund-nodes.mjs --address ${identity.address}`);
     await new Promise((r) => setTimeout(r, 5000));
     [xrp, rl, onchain] = await balances();
   }
 
+  display.event('status', { status: 'registering', note: '' });
   const reg = await withRetry('register', () => postJson(`${COORDINATOR_URL}/providers/register`, { address: identity.address, endpoint: PUBLIC_URL, specs: specs(), price_rlusd: PRICE_RLUSD, label: LABEL }));
   onchain = await registry.providers(identity.address);
   if (STATUS[Number(onchain[1])] === 'suspended') throw new Error('this identity is suspended on-chain (slashed); use a new state directory');
@@ -210,6 +236,7 @@ async function main() {
     const hash = resultHash(await runJob(job));
     results.push({ job_id: job.job_id, result_hash: hash, sig: await identity.signMessage(resultSigningMessage(job.job_id, hash)) });
   }
+  display.event('status', { status: 'benchmark' });
   const bench = await withRetry('benchmark', () => postJson(`${COORDINATOR_URL}/providers/${identity.address}/benchmark`, { results }));
   if (!bench.pass) throw new Error('benchmark failed');
   console.log(`[node] benchmark passed in ${Date.now() - t0}ms, attested ${bench.attest_tx}`);
@@ -228,6 +255,8 @@ async function main() {
   const beat = () => postJson(`${COORDINATOR_URL}/telemetry`, { provider: identity.address, load: running, graded, uptime_s: Math.floor((Date.now() - startedAt) / 1000) }).catch(() => {});
   beat();
   setInterval(beat, 5000).unref();
+  await refreshStatus();
+  if (display.enabled) setInterval(refreshStatus, 5000).unref();
 }
 
 main().catch((error) => { console.error(describeError(error)); process.exit(1); });

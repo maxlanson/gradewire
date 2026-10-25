@@ -30,6 +30,7 @@ const STATE_DIR = process.env.COORDINATOR_STATE_DIR || './.state/coordinator';
 const SAMPLING_RATE = Number(process.env.SAMPLING_RATE || '0.5');
 const FULL_SAMPLING_UNTIL = Number(process.env.FULL_SAMPLING_UNTIL || '3'); // clean checks before the rate drops
 const MAX_INFLIGHT = Number(process.env.MAX_INFLIGHT || '3'); // unverified jobs a fully trusted node may hold
+const OFFLINE_AFTER_MS = Number(process.env.OFFLINE_AFTER_MS || '20000'); // no heartbeat (every 5 s) for this long = offline
 const TRUST_OPTS = { samplingRate: SAMPLING_RATE, fullSamplingUntil: FULL_SAMPLING_UNTIL, maxInflight: MAX_INFLIGHT };
 const MERCHANT_ID = (process.env.MERCHANT_ID || '0xb6aa1d849d8cce69e3acad00f3e938870f0ba3677404ba389e3d2b7b910fd80e').toLowerCase();
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -117,6 +118,7 @@ function providerView(p) {
     address: p.address, endpoint: p.endpoint, label: p.label, price_rlusd: p.price_rlusd, status: p.status,
     bond_rlusd: ethers.formatUnits(BigInt(p.bond_wei), 18), score: scoreOf(p), sampling_rate: samplingRateOf(p), trust: trustFor(p),
     jobs_ok: p.jobs_ok, verified_ok: p.verified_ok, verified_fail: p.verified_fail, last_seen: p.last_seen, attest_tx: p.attest_tx,
+    online: !!p.last_seen && now() - p.last_seen < OFFLINE_AFTER_MS,
     specs: p.specs ? JSON.parse(p.specs) : null,
   };
 }
@@ -240,6 +242,28 @@ async function watchChain() {
   }
 }
 
+// ── liveness watchdog ─────────────────────────────────────────────────────────
+// Nodes heartbeat every 5 s. Going quiet is a health incident (reliability drops, no slash);
+// the feed says so, and again when the node comes back.
+const offline = new Set();
+setInterval(() => {
+  for (const p of allProviders()) {
+    if (p.status !== 'active' || !p.last_seen) continue;
+    const quiet = now() - p.last_seen;
+    if (quiet >= OFFLINE_AFTER_MS && !offline.has(p.address)) {
+      offline.add(p.address);
+      q('INSERT INTO incidents(provider,kind,detail,at) VALUES (?,?,?,?)').run(p.address, 'health', `went offline: no heartbeat for ${Math.round(quiet / 1000)} s; its jobs are rerouted, reliability drops, no slash`, now());
+      emit('health', { provider: p.address, online: false, quiet_s: Math.round(quiet / 1000) });
+      pushProvider(p.address);
+    } else if (quiet < OFFLINE_AFTER_MS && offline.has(p.address)) {
+      offline.delete(p.address);
+      q('INSERT INTO incidents(provider,kind,detail,at) VALUES (?,?,?,?)').run(p.address, 'health', 'back online', now());
+      emit('health', { provider: p.address, online: true });
+      pushProvider(p.address);
+    }
+  }
+}, 5000).unref();
+
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 function send(res, status, body) {
   const encoded = JSON.stringify(body);
@@ -290,7 +314,9 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === 'GET' && path === '/providers') {
       const min = Number(url.searchParams.get('min_score') ?? '0');
-      const list = allProviders().map(providerView).filter((p) => p.score >= min && (url.searchParams.get('status') ? p.status === url.searchParams.get('status') : true));
+      // An offline node (no heartbeat) is never offered as active: a closed laptop is a health
+      // failure, not fraud, so it is skipped and its uptime term drops, without a slash.
+      const list = allProviders().map(providerView).filter((p) => p.score >= min && (url.searchParams.get('status') ? p.status === url.searchParams.get('status') && (url.searchParams.get('status') !== 'active' || p.online) : true));
       list.sort((a, b) => (Number(a.price_rlusd) / Math.max(a.score, 1e-6)) - (Number(b.price_rlusd) / Math.max(b.score, 1e-6)));
       return send(res, 200, { providers: list });
     }

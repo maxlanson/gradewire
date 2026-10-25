@@ -48,6 +48,8 @@ coordinator samples ─▶ ServiceManager.createVerificationTask(jobId, provider
   pass: the agent uses the output; the node has earned one more job in flight (1 for a new node, max 3; 50 % sampling after 3 clean checks)
   fail: Registry.slash in the same tx: 50 % refunds the agent, 30 % to the verifiers that caught it, 20 % treasury;
         node suspended; the agent stops paying it and reroutes the job to an honest node
+node goes quiet mid-job (laptop closed): the agent reroutes within seconds; the coordinator marks it offline after 20 s
+        without heartbeats: a health failure, not fraud. No slash, no pay for unfinished work, reliability drops, no new work until it is back
 coordinator anchors each verdict as a memo on the native XRP Ledger (Testnet)
 ```
 

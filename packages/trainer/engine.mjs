@@ -22,6 +22,11 @@ import { describeTrust } from '../shared/trust.mjs';
 const sdk = createRequire(import.meta.url)('../ap4m/ap4m-hackathon-sdk.cjs');
 
 const VERDICT_WAIT_MS = 150_000;
+// A node's /grade call covers its on-chain redemption (12-25 s) and the job's run (up to 20 s),
+// so a healthy call can take 45 s; anything past this is a node that went away mid-job.
+const NODE_REQUEST_TIMEOUT_MS = 60_000;
+const UNREACHABLE = /fetch failed|ECONN|ENOTFOUND|EHOSTUNREACH|socket hang up|timed? ?out|aborted|AbortError|\b5[023][0-9]\b/i;
+const nodeFetch = (url, init = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(NODE_REQUEST_TIMEOUT_MS) });
 
 export const defaultLog = (tag, msg) => console.log(`${new Date().toISOString().slice(11, 19)} ${tag.padEnd(10)} ${msg}`);
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -37,8 +42,8 @@ export async function withRetry(label, fn, attempts = 4, log = defaultLog) {
   }
 }
 export async function getJson(url) { const res = await fetch(url); const data = await res.json(); if (!res.ok) throw new Error(`${url} failed (${res.status}): ${data.error}`); return data; }
-export async function postJson(url, body, headers = {}) {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+export async function postJson(url, body, headers = {}, fetchImpl = fetch) {
+  const res = await fetchImpl(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
   const text = await res.text();
   let data;
   try { data = JSON.parse(text); } catch { throw new Error(`${url} returned non-JSON (HTTP ${res.status})`); }
@@ -213,10 +218,23 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
     writeJson(inflightFile, item);
     // buyResource retains the signed Voucher before sending it, so resuming with the same
     // arguments never pays twice; a 503 from the node means "retry this same payment".
-    const purchase = await retry(`purchase ${job.job_id}`, () => buyResource({
-      context, provider, wallet, stateDirectory: `${STATE_ROOT}/${operation}`, resourceUrl: offer.resource_url,
-      channelId: item.channelId, maximumAmount: offer.price_wei, operation,
-    }), 6);
+    // Service hiccups are retried up to 6 times; a node that stops answering (closed laptop,
+    // dead tunnel) gets two tries and is then rerouted, so an unreliable node costs seconds, not minutes.
+    let purchase;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        purchase = await buyResource({
+          context, provider, wallet, stateDirectory: `${STATE_ROOT}/${operation}`, resourceUrl: offer.resource_url,
+          channelId: item.channelId, maximumAmount: offer.price_wei, operation, requestFetch: nodeFetch,
+        });
+        break;
+      } catch (error) {
+        const unreachable = UNREACHABLE.test(String(describeError(error)));
+        if (attempt >= (unreachable ? 2 : 6)) throw new Error(`${unreachable ? 'node unreachable' : 'purchase failed'}: ${String(describeError(error)).slice(0, 120)}`);
+        log('[retry]', `purchase ${job.job_id}: ${String(describeError(error)).slice(0, 90)} (attempt ${attempt + 1}/${unreachable ? 2 : 6})`);
+        await new Promise((r) => setTimeout(r, (unreachable ? 1 : attempt) * 3000));
+      }
+    }
     const { result, result_hash, sig, provider: signer } = purchase.resource;
     // Verify what we paid for: spec matches, hash matches, signed by the provider we chose.
     if (result.spec_hash !== specHash(job)) throw new Error(`${job.job_id}: provider graded a different spec`);
@@ -256,7 +274,9 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
     const tag = `[${p.label}]`;
     const inflightFile = `${STATE_ROOT}/inflight-${p.address}.json`;
     let item = existsSync(inflightFile) ? readJson(inflightFile, null) : null;
-    if (item) log(tag, `resuming unfinished purchase ${item.job.job_id}`);
+    // A purchase left behind by a crashed run is settled first so the signed Voucher is not
+    // lost, but its result belongs to that run's question, so it is not used for this one.
+    if (item) { item.resumed = true; log(tag, `settling an unfinished purchase from an earlier run (${item.job.job_id}); its result is not used here`); }
     const pending = new Map(); // job_id -> promise that resolves once its verdict is handled
     let allowed = Math.max(1, p.trust?.max_inflight ?? 1);
     let stop = false;
@@ -339,7 +359,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         if (next.attempts >= 3) { log(agentTag, `giving up on ${next.id} after ${next.attempts} attempts`); await emit({ type: 'giveup', id: next.id, attempts: next.attempts }); continue; }
         const job = buildJob(next);
         let offer;
-        try { offer = await postJson(`${p.endpoint}/jobs`, job); } catch (e) { log(tag, `unreachable (${e.message}); rerouting`); paused.add(p.address); queue.unshift(next); await emit({ type: 'reroute', id: next.id, provider: p.label, reason: 'unreachable' }); break; }
+        try { offer = await postJson(`${p.endpoint}/jobs`, job, {}, nodeFetch); } catch (e) { log(tag, `unreachable (${e.message}); rerouting`); paused.add(p.address); queue.unshift(next); await emit({ type: 'reroute', id: next.id, provider: p.label, reason: 'unreachable' }); break; }
         item = { job, offer, id: next.id, files: next.files, attempts: next.attempts + 1, channelId: p.channelId };
         await emit({ type: 'dispatch', id: next.id, job_id: job.job_id, provider: p.label, price_wei: offer.price_wei, attempt: item.attempts, inflight: pending.size + 1, allowed });
       }
@@ -353,6 +373,7 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
         break;
       }
       const current = item; item = null;
+      if (current.resumed) { log(tag, `settled ${current.job.job_id} from the earlier run`); continue; }
       if (paid.status === 'error') {
         log(tag, `sandbox fault at ${p.label} on ${current.id}: result unusable, not paying ${p.label} again this run; rerouting`);
         paused.add(p.address);

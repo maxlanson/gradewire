@@ -121,6 +121,8 @@
   .ev.fail { border-left-color: var(--fail); background: var(--fail-wash); }
   .ev.fail .what { font-weight: 600; }
   .ev.slash { border-left-color: var(--fail); background: var(--fail-wash); }
+  .ev.warn { border-left-color: var(--warn); }
+  .ev.warn .what { font-weight: 600; }
   .ev.slash .money { color: var(--fail); }
   .ev.new { animation: arrive 1200ms ease-out; }
   .ev.new.fail, .ev.new.slash { animation: arrive-bad 1200ms ease-out; }
@@ -196,7 +198,7 @@ const ICON = {
   muted: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>',
 };
 const status = (kind, text) => `<span class="status st-${kind}">${ICON[kind]}<span class="t">${text}</span></span>`;
-const providerStatus = (p) => p.status === 'suspended' ? status('bad', 'suspended') : p.status === 'active' ? status('good', 'active') : status('warn', p.status);
+const providerStatus = (p) => p.status === 'suspended' ? status('bad', 'suspended') : p.status === 'active' ? (p.online === false ? status('warn', 'offline') : status('good', 'active')) : status('warn', p.status);
 const fixed = (n, d = 2) => (n == null || Number.isNaN(n) ? '—' : Number(n).toFixed(d));
 const describeTrust = (t) => !t ? '—' : t.max_inflight === 0 ? '<span class="fail-t">none, suspended</span>' : `<b>${t.max_inflight}</b> at a time <span class="m">· ${t.sampling_rate >= 1 ? 'all re-run' : `${Math.round(t.sampling_rate * 100)}% re-run`}</span>`;
 const trustCell = (p) => `<span class="trust">${p.status === 'active' || p.status === 'suspended' ? describeTrust(p.trust) : '<span class="m">—</span>'}</span>`;
@@ -236,10 +238,11 @@ function render() {
   const verified = jobs.filter((j) => j.verdict === 'pass' || j.verdict === 'fail').length;
   const caught = jobs.filter((j) => j.verdict === 'fail').length;
   renderStats(jobs.length, paid, verified, jobs.filter((j) => j.sampled).length, caught);
-  $('nodesn').textContent = `${providers.filter((p) => p.status === 'active').length} active`;
+  const offlineCount = providers.filter((p) => p.status === 'active' && p.online === false).length;
+  $('nodesn').textContent = `${providers.filter((p) => p.status === 'active' && p.online !== false).length} active${offlineCount ? `, ${offlineCount} offline` : ''}`;
   $('providers').innerHTML = providers.map((p) => `<tr>
     <td class="node"><span class="dot" style="background:${colorOf(p.address)}"></span>${p.label || short(p.address)}${addrLink(p.address)}</td>
-    <td>${providerStatus(p)}${p.status === 'active' && ago(p.last_seen) !== 'online' ? ` <span class="mono">${ago(p.last_seen)}</span>` : ''}</td>
+    <td>${providerStatus(p)}${p.status === 'active' && p.online === false ? ` <span class="mono">${ago(p.last_seen)}</span>` : ''}</td>
     <td><span class="meter${p.status === 'suspended' ? ' bad' : ''}"><b style="width:${Math.round(p.score * 100)}%"></b></span>${p.score.toFixed(2)}</td>
     <td>${trustCell(p)}</td>
     <td class="r">${Number(p.bond_rlusd).toFixed(2)}</td>
@@ -281,7 +284,7 @@ function applySnapshot(s) {
   for (const p of s.payments) { const j = byPaidTx.get((p.tx || '').toLowerCase()); const prov = j?.provider || (p.submitter || '').toLowerCase(); feed.push({ at: p.at, provider: prov, who: label(prov), cls: 'ok', what: `got paid ${money(rlusd(p.amount_rlusd, p.amount_wei) || 0)} <span class="m">· voucher redeemed on-chain</span>`, tx: p.tx }); }
   for (const v of s.verifications) { const t = state.tasks.get(v.task_id); feed.push({ at: v.at, provider: t?.provider, who: verifierName(v.operator), sys: true, what: `re-ran ${label(t?.provider)}'s job: <b>${v.matched ? 'same hash' : 'different hash'}</b>`, tx: v.tx }); }
   for (const t of state.tasks.values()) { if (t.pass == null || !t.verdict_tx) continue; const at = Math.max(0, ...s.verifications.filter((v) => v.task_id === t.task_id).map((v) => v.at || 0)); if (!at) continue; feed.push({ at: at + 1, provider: t.provider, who: label(t.provider), cls: t.pass ? 'ok' : 'fail', what: t.pass ? 'verified: verdict posted on-chain' : 'FAILED verification <span class="m">· result did not reproduce · payments to this node stop</span>', tx: t.verdict_tx }); }
-  for (const i of s.incidents) { if (i.kind === 'slash') { const m = i.detail.match(/([\d.]+) RLUSD refunded/); feed.push({ at: i.at, provider: i.provider, who: label(i.provider), cls: 'slash', what: `bond slashed: ${money(m ? m[1] : 0, 3)} refunded to the agent`, tx: i.tx }); } else if (i.kind === 'bond') feed.push({ at: i.at, provider: i.provider, who: label(i.provider), what: i.detail, tx: i.tx }); }
+  for (const i of s.incidents) { if (i.kind === 'health') feed.push({ at: i.at, provider: i.provider, who: label(i.provider), cls: /back online/.test(i.detail) ? 'ok' : 'warn', what: i.detail }); else if (i.kind === 'slash') { const m = i.detail.match(/([\d.]+) RLUSD refunded/); feed.push({ at: i.at, provider: i.provider, who: label(i.provider), cls: 'slash', what: `bond slashed: ${money(m ? m[1] : 0, 3)} refunded to the agent`, tx: i.tx }); } else if (i.kind === 'bond') feed.push({ at: i.at, provider: i.provider, who: label(i.provider), what: i.detail, tx: i.tx }); }
   state.feed = feed.filter((e) => e.at).sort((a, b) => b.at - a.at);
   render();
 }
@@ -300,6 +303,7 @@ function handle(type, d) {
   else if (type === 'bond') { push({ at: d.at, provider: d.provider, who: label(d.provider), what: d.withdrawn ? `withdrew bond with an approver signature <span class="m">(remaining ${Number(d.total_rlusd).toFixed(2)} RLUSD)</span>` : `posted a ${Number(d.total_rlusd).toFixed(2)} RLUSD bond`, tx: d.tx }); }
   else if (type === 'anchor') { const j = state.jobs.get(d.job_id); if (j) j.anchor_tx = d.xrpl_tx; push({ at: d.at, provider: d.provider, who: 'Coordinator', sys: true, what: `anchored the verdict on the XRP Ledger <a class="mono" href="${d.url}" target="_blank" rel="noopener">${short(d.xrpl_tx)}</a>` }); }
   else if (type === 'budget') { state.budgets.set(d.agent, d); }
+  else if (type === 'health') { push(d.online ? { at: d.at, provider: d.provider, who: label(d.provider), cls: 'ok', what: 'back online' } : { at: d.at, provider: d.provider, who: label(d.provider), cls: 'warn', what: `went offline <span class="m">· no heartbeat for ${d.quiet_s} s · its jobs are rerouted, reliability drops, no slash</span>` }); }
   render();
 }
 function connect() {
@@ -307,7 +311,7 @@ function connect() {
   es.onopen = () => { $('live').className = 'live'; $('live').lastElementChild.textContent = 'live'; };
   es.onerror = () => { $('live').className = 'live off'; $('live').lastElementChild.textContent = 'reconnecting'; };
   es.addEventListener('snapshot', (e) => applySnapshot(JSON.parse(e.data)));
-  for (const t of ['provider', 'payment', 'job', 'task', 'response', 'verdict', 'slash', 'bond', 'anchor', 'budget']) es.addEventListener(t, (e) => handle(t, JSON.parse(e.data)));
+  for (const t of ['provider', 'payment', 'job', 'task', 'response', 'verdict', 'slash', 'bond', 'anchor', 'budget', 'health']) es.addEventListener(t, (e) => handle(t, JSON.parse(e.data)));
 }
 connect();
 setInterval(render, 5000);
