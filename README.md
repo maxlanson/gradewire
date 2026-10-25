@@ -8,6 +8,17 @@ Gradewire is a network where anyone's computer sells compute to AI agents, one j
 
 Built at the AI & Fintech XRPL Hackathon (New York, Oct 24–25 2026). Everything in this repo was written during the event. Main track: **Agentic Finance**.
 
+## Teammates: run a node from your laptop
+
+Needs a Mac with Docker Desktop running, plus `brew install node cloudflared`. Then:
+
+```bash
+git clone https://github.com/maxlanson/gradewire && cd gradewire
+scripts/join.sh --coordinator https://<url from the team laptop> --label "Node <your name>"
+```
+
+Send the address it prints to the team laptop to be funded; a minute later your node is on the dashboard and gets paid per job. Details and troubleshooting: [`docs/JOIN.md`](docs/JOIN.md).
+
 ## What runs live
 
 | Component | Where | What it does |
