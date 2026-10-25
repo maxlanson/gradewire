@@ -80,9 +80,12 @@ export function createX402Resources(config) {
     // refuse every new purchase on its Channel for good. Void them all. If one had already been
     // redeemed on-chain, the node was paid for a result it never delivered: that is logged, and it is
     // the node's reliability score, not the buyer, that pays for it.
+    db.prepare("DELETE FROM payments WHERE complete=1 AND json_extract(value, '$.transactionHash') IS NULL AND voucher_digest NOT IN (SELECT voucher_digest FROM resource_results)").run(); // rows voided by an earlier version
     const left = db.prepare("SELECT channel_id, json_extract(value, '$.transactionHash') AS tx FROM payments WHERE complete=0").all();
     if (left.length) {
-      db.prepare('UPDATE payments SET complete=1 WHERE complete=0').run();
+      // Delete, do not mark complete: the next Voucher on that Channel has the same running total and
+      // therefore the same digest, and a leftover row with that digest would be a 'payment conflict' forever.
+      db.prepare('DELETE FROM payments WHERE complete=0').run();
       for (const r of left) console.log(`[x402] voided a payment left unfinished by the previous run on channel ${String(r.channel_id).slice(0, 10)}… (${r.tx ? `redeemed in ${String(r.tx).slice(0, 12)}…, result never delivered` : 'never submitted'}); the Channel is usable again`);
     }
   } catch (error) { closeSync(lock); unlinkSync(lockPath); throw error; }
@@ -128,7 +131,7 @@ export function createX402Resources(config) {
       // A retained payment the buyer has not replayed within about two minutes of its challenge
       // (validBefore is issue time + 300 s) was abandoned by a buyer that rerouted the job: void it
       // rather than refuse this Channel until the window closes.
-      const voided = db.prepare("UPDATE payments SET complete=1 WHERE channel_id=? AND complete=0 AND json_extract(value, '$.challenge.value.validBefore') < ?").run(channelId, current + 180);
+      const voided = db.prepare("DELETE FROM payments WHERE channel_id=? AND complete=0 AND json_extract(value, '$.challenge.value.validBefore') < ?").run(channelId, current + 180);
       if (voided.changes) console.log(`[x402] voided ${voided.changes} abandoned payment(s) on channel ${channelId.slice(0, 10)}… (not replayed for 2 min); the Channel is usable again`);
       if (db.prepare('SELECT 1 FROM payments WHERE channel_id=? AND complete=0').get(channelId)) return send(response, 409, { error: 'retry_retained_payment' });
       const existing = db.prepare('SELECT value FROM challenges WHERE channel_id=? AND url=?').get(channelId, resourceUrl);
