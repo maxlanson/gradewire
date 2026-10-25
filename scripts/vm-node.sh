@@ -23,10 +23,11 @@ done
 command -v limactl >/dev/null || { echo "brew install lima" >&2; exit 1; }
 say() { printf '\033[1m[vm %s]\033[0m %s\n' "$NAME" "$*"; }
 
-if ! limactl list --format '{{.Name}}' | grep -qx "$NAME"; then
+STATUS=$(limactl list --format '{{.Name}} {{.Status}}' 2>/dev/null | awk -v n="$NAME" '$1 == n { print $2 }')
+if [[ -z "$STATUS" ]]; then
   say "creating the VM (Ubuntu + Docker; first time downloads the image)…"
-  limactl start --name "$NAME" --cpus 2 --memory 2 --disk 10 --tty=false template://docker >/dev/null
-elif [[ "$(limactl list --format '{{.Name}} {{.Status}}' | grep "^$NAME " | awk '{print $2}')" != "Running" ]]; then
+  limactl start --name "$NAME" --cpus 2 --memory 2 --disk 10 --tty=false template:docker >/dev/null
+elif [[ "$STATUS" != "Running" ]]; then
   say "starting the VM…"; limactl start "$NAME" >/dev/null
 fi
 
