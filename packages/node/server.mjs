@@ -236,13 +236,16 @@ async function main() {
   }
 
   display.event('status', { status: 'registering', note: '' });
-  const reg = await withRetry('register', () => postJson(`${COORDINATOR_URL}/providers/register`, { address: identity.address, endpoint: PUBLIC_URL, specs: specs(), price_rlusd: PRICE_RLUSD, label: LABEL }));
+  // On-chain registration first: the coordinator's benchmark challenge has a 60 s deadline, so it
+  // must be requested right before the benchmark runs, not before a transaction that can take a while.
   onchain = await registry.providers(identity.address);
   if (STATUS[Number(onchain[1])] === 'suspended') throw new Error('this identity is suspended on-chain (slashed); use a new state directory');
   if (STATUS[Number(onchain[1])] === 'none') {
     const tx = await withRetry('register on-chain', async () => { const t = await registry.connect(wallet).register(PUBLIC_URL); await t.wait(); return t; });
     console.log(`[node] registered on-chain ${tx.hash}`);
   }
+  const registerWithCoordinator = () => withRetry('register', () => postJson(`${COORDINATOR_URL}/providers/register`, { address: identity.address, endpoint: PUBLIC_URL, specs: specs(), price_rlusd: PRICE_RLUSD, label: LABEL }));
+  let reg = await registerWithCoordinator();
   if (reg.challenge) {
     // Benchmark: run honestly even in cheat mode (a cheater passes the entry test too).
     const t0 = Date.now();
@@ -253,8 +256,15 @@ async function main() {
       results.push({ job_id: job.job_id, result_hash: hash, sig: await identity.signMessage(resultSigningMessage(job.job_id, hash)) });
     }
     display.event('status', { status: 'benchmark' });
-    const bench = await withRetry('benchmark', () => postJson(`${COORDINATOR_URL}/providers/${identity.address}/benchmark`, { results }));
-    if (!bench.pass) throw new Error('benchmark failed');
+    let bench = await withRetry('benchmark', () => postJson(`${COORDINATOR_URL}/providers/${identity.address}/benchmark`, { results }));
+    if (!bench.pass) {
+      console.log('[node] benchmark not accepted (most likely past its 60 s deadline); asking for a fresh challenge');
+      reg = await registerWithCoordinator();
+      const again = [];
+      for (const spec of reg.challenge?.jobs ?? []) { const job = parseJob(spec); const hash = resultHash(await runJob(job)); again.push({ job_id: job.job_id, result_hash: hash, sig: await identity.signMessage(resultSigningMessage(job.job_id, hash)) }); }
+      bench = reg.challenge ? await withRetry('benchmark', () => postJson(`${COORDINATOR_URL}/providers/${identity.address}/benchmark`, { results: again })) : { pass: true, attest_tx: 'already attested' };
+      if (!bench.pass) throw new Error('benchmark failed twice');
+    }
     console.log(`[node] benchmark passed in ${Date.now() - t0}ms, attested ${bench.attest_tx}`);
   } else {
     console.log('[node] already attested and bonded on-chain; the coordinator skipped the benchmark');
