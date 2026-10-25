@@ -10,7 +10,9 @@
     "@ap4m/sdk": "https://hackathon.ap4m.build/sdk/ap4m-sdk.tgz",
     "@ledgerhq/hw-app-eth": "^7.11.1",
     "@ledgerhq/hw-transport-node-hid": "^6.33.5",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "ethers": "6.17.0",
-    "xrpl": "^4.7.0"
+    "xrpl": "^4.7.0",
+    "zod": "^4.6.7"
   }
 }

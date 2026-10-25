@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gradewire": {
+      "command": "node",
+      "args": ["--env-file=.env", "packages/mcp/server.mjs"]
+    }
+  }
+}

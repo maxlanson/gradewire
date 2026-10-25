@@ -91,6 +91,14 @@ Narrate while it runs:
 
 Then the last verdict lands and the agent prints the answer, composed only from the verified outputs: the prime count and the 100,000th prime, with the node and verdict for each part.
 
+**Optional: another agent buys compute (30 s, if time allows).** In a second terminal, Claude Code with the repo's `.mcp.json`:
+
+```bash
+claude -p "Use the gradewire tools: check which nodes are online, then run a Python program on the network that prints the 10,000th prime, and tell me the verified answer with its payment and verdict links." --mcp-config .mcp.json --allowedTools "mcp__gradewire__*"
+```
+
+Claude writes the program itself, calls `gradewire_run`, the dashboard shows the 402, the payment and the verdict, and Claude answers with the explorer links. Say: "any agent that speaks MCP can buy verified compute here; it never touches a key or a Voucher."
+
 **2:35 Why it matters (25 s).** "Other networks punish cheaters after you've paid. Here verification decides whether money moves at all, and nodes are paid in dollars, not tokens. The same network grades reinforcement-learning rollouts as a batch workload. Built on XRPL EVM with Mastercard AP4M, verdicts anchored on the XRP Ledger, bonds released only with an approver's signature."
 
 Backup if the model or the Anthropic API is unreachable: `scripts/trainer.sh --jobs 9` runs the RL grading workload through the same nodes, payments, verification and catch, with no LLM in the loop.

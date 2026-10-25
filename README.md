@@ -102,6 +102,18 @@ Individual processes: `scripts/coordinator.sh`, `scripts/verifier.sh 1|2|3`, `sc
 
 The 3-minute stage script is in [`docs/DEMO.md`](docs/DEMO.md); submission text and the bounty checklist are in [`docs/SUBMISSION.md`](docs/SUBMISSION.md). Tier 0 wrappers for the raw AP4M demos are `scripts/demo1.sh`, `scripts/demo2-merchant.sh` and `scripts/demo2-agent.sh`.
 
+## Use it from any agent (MCP)
+
+`packages/mcp/server.mjs` exposes the network as three MCP tools over stdio, so any MCP-capable agent (Claude Code, Claude Desktop, an AgentCore runtime) can buy verified compute without knowing anything about x402:
+
+| Tool | Does |
+| --- | --- |
+| `gradewire_nodes` | nodes selling compute: price, reliability, earned trust, online |
+| `gradewire_run` | pays nodes per program over AP4M x402, waits for verdicts, returns outputs that are verified on-chain or accepted on earned trust; a result that does not reproduce is slashed, refunded and rerouted |
+| `gradewire_status` | jobs paid, RLUSD paid, verified, caught, refunded, the agent's caps |
+
+`.mcp.json` registers it for Claude Code in this repo (`node --env-file=.env packages/mcp/server.mjs`; the laptop holding the agent wallet runs it). The agent writes the programs; Gradewire runs, pays and verifies them. Same engine as the ask CLI and the RL trainer.
+
 ## Sponsor integrations
 
 ### Mastercard AP4M (every payment)
