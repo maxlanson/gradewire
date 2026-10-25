@@ -97,20 +97,35 @@ async function main() {
 
   // ── one Channel per provider (each Channel has its own cumulative Voucher counter) ──
   const { token } = await withRetry('signIn', () => sdk.signIn(AP4M_API_URL, TEAM_NAME, wallet));
+  // The service caps the number of open Channels per payout, so Channels are a pool: keep a
+  // grader's Channel across runs, reclaim Channels whose grader is gone (banned, offline),
+  // and only open a new one when the pool is empty. A grader we cannot fund is skipped.
   const channels = readJson(CHANNELS_FILE, {});
-  const spare = process.env.CHANNEL_ID && !Object.values(channels).includes(process.env.CHANNEL_ID) ? process.env.CHANNEL_ID : null;
   const usable = async (id) => { try { const s = await sdk.getChannelState(provider, config.contracts.paymentLedger, id); return s.status === 1 && s.cap - s.redeemed >= maxPriceWei * 2n; } catch { return false; } };
+  const current = new Set(providers.map((p) => p.address));
+  const pool = [];
+  for (const [addr, id] of Object.entries(channels)) if (!current.has(addr)) { delete channels[addr]; pool.push(id); }
+  if (process.env.CHANNEL_ID) pool.push(process.env.CHANNEL_ID);
+  for (const c of await sdk.listChannels(AP4M_API_URL, token)) if (c.channel_status === 'open') pool.push(c.channel_id);
+  const assigned = new Set(Object.values(channels));
+  const funded = [];
   for (const p of providers) {
-    if (channels[p.address] && await usable(channels[p.address])) { p.channelId = channels[p.address]; continue; }
-    if (spare && await usable(spare) && !Object.values(channels).includes(spare)) { p.channelId = spare; }
-    else {
+    if (channels[p.address] && await usable(channels[p.address])) { p.channelId = channels[p.address]; funded.push(p); continue; }
+    delete channels[p.address];
+    for (const id of pool) { if (!assigned.has(id) && await usable(id)) { p.channelId = id; break; } }
+    if (!p.channelId) {
       const cap = process.env.CHANNEL_CAP || '0.5';
       log('[trainer]', `opening a ${cap} RLUSD Channel for ${p.label}`);
-      p.channelId = (await withRetry('requestChannel', () => sdk.requestChannel(AP4M_API_URL, token, wallet, { capRlusd: cap }), 2)).channel_id;
+      try { p.channelId = (await sdk.requestChannel(AP4M_API_URL, token, wallet, { capRlusd: cap })).channel_id; } catch (e) { log('[trainer]', `cannot fund ${p.label}: ${String(e.message).slice(0, 90)}; skipping it`); continue; }
     }
     channels[p.address] = p.channelId;
+    assigned.add(p.channelId);
+    funded.push(p);
     writeFileSync(CHANNELS_FILE, JSON.stringify(channels, null, 1));
   }
+  writeFileSync(CHANNELS_FILE, JSON.stringify(channels, null, 1));
+  providers = funded;
+  if (!providers.length) throw new Error('no provider could be funded with a Channel');
   for (const p of providers) {
     const s = await sdk.getChannelState(provider, config.contracts.paymentLedger, p.channelId);
     log('[trainer]', `${p.label}: channel ${short(p.channelId)} cap ${ethers.formatUnits(s.cap, 18)} spent ${ethers.formatUnits(s.redeemed, 18)} RLUSD`);
@@ -216,6 +231,15 @@ async function main() {
         log('[settled]', `${p.label}: ${settled.claims_settled} claims, latest ${settled.amount_rlusd} RLUSD to ${settled.recipient}  ${explorer}/tx/${settled.payout_tx}`);
         if (settled.receipt_url) log('[receipt]', `${AP4M_API_URL}${settled.receipt_url}`);
       } catch (e) { log('[settle]', `${p.label}: ${e.message} (the service settles automatically later)`); }
+    }
+    // A banned grader never gets paid again: close its Channel to free the slot and the budget.
+    for (const p of providers.filter((x) => banned.has(x.address))) {
+      try {
+        const closed = await withRetry(`close ${p.label}`, () => sdk.closeChannel(AP4M_API_URL, token, wallet, p.channelId), 2);
+        delete channels[p.address];
+        writeFileSync(CHANNELS_FILE, JSON.stringify(channels, null, 1));
+        log('[closed]', `${p.label}'s Channel closed  ${explorer}/tx/${closed.tx_hash}`);
+      } catch (e) { log('[close]', `${p.label}: ${e.message}`); }
     }
   }
 }

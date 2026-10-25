@@ -1,4 +1,4 @@
-// Anchors each verdict on the native XRP Ledger (Testnet): a 1-drop self-payment whose memo
+// Anchors each verdict on the native XRP Ledger (Testnet): an AccountSet transaction whose memo
 // carries the verdict hash, so the EVM-side verdict is also attested on the main ledger.
 // The coordinator's XRPL wallet is created and faucet-funded on first use.
 
@@ -35,8 +35,10 @@ export function createAnchor(stateDir) {
       if (!ready) ready = init();
       await ready;
       const memo = JSON.stringify({ app: 'gradewire', kind, ...payload });
+      // AccountSet with no flag changes is a valid, fee-only transaction that carries memos
+      // (a self-payment is rejected by the ledger as temREDUNDANT).
       const tx = await client.autofill({
-        TransactionType: 'Payment', Account: wallet.classicAddress, Destination: wallet.classicAddress, Amount: '1',
+        TransactionType: 'AccountSet', Account: wallet.classicAddress,
         Memos: [{ Memo: { MemoType: convertStringToHex('gradewire/verdict'), MemoData: convertStringToHex(memo), MemoFormat: convertStringToHex('application/json') } }],
       });
       const result = await client.submitAndWait(wallet.sign(tx).tx_blob);

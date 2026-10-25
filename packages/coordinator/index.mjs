@@ -216,7 +216,7 @@ async function watchChain() {
   // A fresh database starts a little behind the head (fresh counters for a demo run); an
   // existing one resumes exactly where it stopped so no event is missed across restarts.
   const saved = q('SELECT value FROM meta WHERE key=\'last_block\'').get()?.value;
-  let from = saved ? Number(saved) : Math.max(deployment.deployBlock, (await provider.getBlockNumber()) - 50);
+  let from = saved ? Number(saved) : Math.max(deployment.deployBlock, (await provider.getBlockNumber()) - 5);
   const addresses = [deployment.serviceManager, deployment.registry, deployment.paymentLedger];
   for (;;) {
     try {
