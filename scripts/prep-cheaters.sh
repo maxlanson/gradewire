@@ -14,11 +14,12 @@ for k in $(seq 1 "$N"); do
   limactl shell node-c -- bash -c '"$HOME/gradewire/.state/cheater.sh" prep '"$k" 2>/dev/null
   addr=""
   for i in $(seq 1 30); do
-    addr=$(limactl shell node-c -- bash -c "grep -o 'waiting for funding of 0x[0-9a-fA-F]*' ~/gradewire/.state/logs/prep-$k.log 2>/dev/null | head -1 | awk '{print \$NF}'" 2>/dev/null || true)
+    # the node prints its address on its first line; it then either waits for funding or (already funded) joins
+    addr=$(limactl shell node-c -- bash -c "grep -o 'prep C-$k 0x[0-9a-fA-F]*' ~/gradewire/.state/logs/prep-$k.log 2>/dev/null | head -1 | awk '{print \$NF}'" 2>/dev/null || true)
     [[ -n "$addr" ]] && break; sleep 2
   done
   [[ -n "$addr" ]] || { echo "cheater $k: no address printed (see prep-$k.log in the VM)"; exit 1; }
-  node --env-file=.env scripts/fund-nodes.mjs --address "$addr" 2>&1 | tail -n 1
+  node --env-file=.env scripts/fund-nodes.mjs --address "$addr" 2>&1 | tail -n 1   # idempotent: tops up only what is missing
   for i in $(seq 1 90); do
     limactl shell node-c -- bash -c "grep -q 'on-chain status: active' ~/gradewire/.state/logs/prep-$k.log" 2>/dev/null && break; sleep 2
   done
