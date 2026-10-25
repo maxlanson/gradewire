@@ -9,7 +9,7 @@
 // Env: AGENT_PRIVATE_KEY, AP4M_API_URL, TEAM_NAME, CHANNEL_ID (an open Channel to reuse for
 // the first provider), CHANNEL_CAP (cap for new Channels, default 0.5), TRAINER_STATE_DIR.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 import { ethers } from 'ethers';
@@ -25,7 +25,7 @@ const VERDICT_WAIT_MS = 150_000;
 // A node's /grade call covers its on-chain redemption (12-25 s) and the job's run (up to 45 s),
 // so a healthy call can take 70 s; anything past this is a node that went away mid-job.
 const NODE_REQUEST_TIMEOUT_MS = 100_000; // redemption (12-25 s) + a job of up to 45 s, with margin
-const UNREACHABLE = /fetch failed|ECONN|ENOTFOUND|EHOSTUNREACH|socket hang up|timed? ?out|aborted|AbortError|\b5[023][0-9]\b/i;
+const UNREACHABLE = /fetch failed|ECONN|ENOTFOUND|EHOSTUNREACH|socket hang up|timed? ?out|aborted|AbortError|\b5(02|04|2[0-9]|3[0-9])\b/i; // 503 is a live node declining, not a dead one
 const nodeFetch = (url, init = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(NODE_REQUEST_TIMEOUT_MS) });
 
 export const defaultLog = (tag, msg) => console.log(`${new Date().toISOString().slice(11, 19)} ${tag.padEnd(10)} ${msg}`);
@@ -136,8 +136,22 @@ export async function runPaidJobs({ items, buildJob, maxPrice, minScore = '0.8',
       const retained = readJson(`${STATE_ROOT}/${dir.name}/purchase.json`, null);
       if (!retained || retained.complete || retained.intent?.channelId !== channelId) continue;
       log(agentTag, `resuming unresolved purchase ${retained.intent.operation} on channel ${short(channelId)}`);
-      const r = await buyResource({ context, provider, wallet, stateDirectory: `${STATE_ROOT}/${dir.name}`, ...retained.intent });
-      retry('record-redemption', () => postJson(`${AP4M_API_URL}/public/participant/record-redemption`, { tx_hash: r.transactionHash }, { Authorization: `Bearer ${token}` })).catch(() => {});
+      try {
+        const r = await buyResource({ context, provider, wallet, stateDirectory: `${STATE_ROOT}/${dir.name}`, ...retained.intent, requestFetch: nodeFetch });
+        retry('record-redemption', () => postJson(`${AP4M_API_URL}/public/participant/record-redemption`, { tx_hash: r.transactionHash }, { Authorization: `Bearer ${token}` })).catch(() => {});
+      } catch (error) {
+        // A Voucher the node never redeemed (no transaction on record) and now refuses, because its
+        // challenge expired while the node was down, can never complete: set it aside so the Channel
+        // is usable again. A Voucher that was redeemed is always retried (the result is owed).
+        const ageMin = (Date.now() - statSync(`${STATE_ROOT}/${dir.name}/purchase.json`).mtimeMs) / 60_000;
+        const refused = /(409|503|outcome unavailable|retained|acceptance_closed)/i.test(describeError(error));
+        if (!retained.transactionHash && refused && ageMin > 3) {
+          renameSync(`${STATE_ROOT}/${dir.name}`, `${STATE_ROOT}/abandoned-${dir.name}`);
+          log(agentTag, `set aside stale purchase ${retained.intent.operation} (${ageMin.toFixed(0)} min old, never redeemed, node refuses it); channel ${short(channelId)} is usable again`);
+          continue;
+        }
+        throw error;
+      }
     }
   }
 
