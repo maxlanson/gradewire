@@ -27,6 +27,40 @@ Open explorer tabs on the agent wallet and the team payout wallet.
 
 Phone hotspot ready. If the venue Wi-Fi drops, the external dependencies are the XRPL EVM RPC, the AP4M service, the Anthropic API and the XRPL Testnet websocket (verdict anchoring; a failed anchor is logged and does not block anything). The sandbox image is already pulled, so running the jobs themselves needs no network.
 
+## Demo day with outside laptops (order matters)
+
+The agent can fund at most **three AP4M Channels per run**, so a run uses at most three nodes. For the stage: Node A (honest, this laptop), Node C (cheater, this laptop) and one teammate's laptop (honest, closes the lid for the unreliable beat). Do the steps in this order; a coordinator reset after teammates have joined forgets them and they must join again.
+
+```bash
+# 1. reset and start, without Node B (its slot goes to the teammate)
+scripts/demo-down.sh; rm -rf .state/coordinator .state/node-4403; find .state/trainer -name 'inflight-*.json' -delete
+node --env-file=.env scripts/fund-nodes.mjs 4403
+NODES="A C" scripts/demo-up.sh
+
+# 2. expose the coordinator and share the URL (new tunnel names take ~30 s to resolve on some networks)
+scripts/tunnel.sh 4500          # keep this terminal open for the whole demo
+
+# 3. teammate, on their laptop (see docs/JOIN.md):
+#    git clone https://github.com/maxlanson/gradewire && cd gradewire
+#    scripts/join.sh --coordinator https://<url from step 2> --label "Node Sam"
+#    -> they read out the 0x address their panel shows
+
+# 4. fund it (3 XRP from the agent wallet, 0.01 RLUSD bond from the payout wallet)
+node --env-file=.env scripts/fund-nodes.mjs --address 0x<their address>
+
+# 5. wait until the dashboard shows Node A, Node C and their node active, then dry-run once
+scripts/ask.sh "How many primes are below 10 million, and what is the 100,000th prime?" --parts 3 --dry-run
+```
+
+On stage, run the same question with `--parts 3` (one part per node). Cue the teammate to close the lid when the dashboard's feed shows their node "ran …" or their panel says "running"; the window is the 15-25 s a job takes. After the run, their laptop reopened shows "back online" in the feed.
+
+Gotchas:
+- **Tunnel URL changed** (you restarted `scripts/tunnel.sh`): teammates re-run the join command with the new URL; their key and funding are reused.
+- **Coordinator reset** (`rm -rf .state/coordinator`): teammates must re-run the join (the node re-registers; no new funding).
+- **A teammate ran `--cheat` and got slashed**: that key is suspended on-chain for good. They `rm -rf .state/node-4411` and re-run the join; you fund the new address.
+- **More than three eligible nodes**: the agent funds Channels in the coordinator's ranking order and prints `cannot fund <node>` for the rest; stop a local node (`NODES="A C"`) rather than relying on the ranking.
+- **Quicknode's 15 requests/s** is shared by every process including joined nodes; one or two joiners is fine, a room full is not.
+
 ## On stage
 
 **0:00 The problem (20 s).** "An AI agent on your laptop needs compute it can trust. Today that means a centralized cloud, because if you hand a job to a stranger's computer you have no way to know whether it actually ran it. And an agent that acts on a made-up result does damage quietly."

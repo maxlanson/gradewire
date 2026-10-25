@@ -43,7 +43,8 @@ curl -sf -m 10 "$COORDINATOR/state" >/dev/null || fail "cannot reach the coordin
 say "prerequisites ok: node $(node --version), docker $(docker version --format '{{.Server.Version}}'), cloudflared, coordinator reachable"
 
 # 2. packages and the pinned sandbox image
-if [[ ! -d node_modules ]]; then say "installing npm packages…"; npm ci --silent; fi
+# --ignore-scripts: no native builds (the Ledger packages ship prebuilt binaries the node never loads), so no Xcode tools needed
+if [[ ! -d node_modules ]]; then say "installing npm packages…"; npm ci --silent --ignore-scripts; fi
 IMAGE=$(node -e "import('./packages/shared/index.mjs').then((m) => console.log(m.SANDBOX_IMAGE))")
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then say "pulling the pinned sandbox image (one time)…"; docker pull -q "$IMAGE" >/dev/null; fi
 say "sandbox image ready: ${IMAGE:0:30}…"

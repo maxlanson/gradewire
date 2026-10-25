@@ -49,10 +49,19 @@ Tested from the team laptop itself with both tunnels in place: `scripts/join.sh`
 coordinator's tunnel, funding by address, on-chain registration, benchmark, bond, then one paid
 job over the node's HTTPS tunnel via `scripts/ask.sh --node https://...trycloudflare.com`.
 
+## If you were the cheater
+
+A node started with `--cheat` is caught on its first re-run and its key is suspended on-chain for
+good. To take part again: `rm -rf .state/node-4411`, re-run the join command, and send the new
+address to be funded.
+
 ## What can go wrong
 
 - *cannot reach the coordinator*: the tunnel URL changed, or your DNS has not learned the new
   hostname yet (new trycloudflare names take up to a minute to resolve on some networks).
+- *The team laptop reset its coordinator*: just re-run the join command; your key and funding are kept.
+- *`cannot fund <your node>` in the agent's output*: the agent can pay at most three nodes per run; ask the
+  team laptop to stop one of its local nodes.
 - *Docker is installed but not running*: start Docker Desktop.
 - Intel Macs or Linux x86: the sandbox image is pinned by digest and the jobs are integer
   arithmetic, so hashes are expected to match the Apple Silicon verifiers, but this was not
