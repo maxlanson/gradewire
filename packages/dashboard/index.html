@@ -23,17 +23,17 @@
     margin: 0; color: var(--ink);
     font: 14px/1.45 -apple-system, "SF Pro Text", "Helvetica Neue", "IBM Plex Sans", system-ui, sans-serif;
     font-variant-numeric: tabular-nums;
-    background: linear-gradient(180deg, #332a25 0%, #221d1a 55%, #1a1715 100%) #231d19;
+    background: linear-gradient(180deg, #33231f 0%, #221b19 55%, #1a1615 100%) #231d19;
     height: 100vh; overflow: hidden; padding: 44px 40px 30px; display: grid;
   }
   /* The colour: four blurred blobs that drift very slowly (a full cycle is over a minute), so the
      background breathes without ever pulling the eye from the feed. Still under reduced motion. */
   .sky { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
   .sky i { position: absolute; border-radius: 50%; filter: blur(70px); will-change: transform; opacity: 0.95; }
-  .sky .b1 { width: 70vw; height: 70vh; left: -22vw; bottom: -30vh; background: rgba(176, 82, 34, 0.95); animation: drift1 75s ease-in-out infinite alternate; }
-  .sky .b2 { width: 50vw; height: 50vh; left: -10vw; top: -22vh; background: rgba(150, 104, 40, 0.85); animation: drift2 95s ease-in-out infinite alternate; }
-  .sky .b3 { width: 60vw; height: 70vh; right: -22vw; top: -28vh; background: rgba(118, 156, 128, 0.90); animation: drift3 85s ease-in-out infinite alternate; }
-  .sky .b4 { width: 45vw; height: 55vh; right: -16vw; bottom: -24vh; background: rgba(84, 120, 106, 0.70); animation: drift4 110s ease-in-out infinite alternate; }
+  .sky .b1 { width: 70vw; height: 70vh; left: -22vw; bottom: -30vh; background: rgba(188, 52, 36, 0.95); animation: drift1 28s ease-in-out infinite alternate; }
+  .sky .b2 { width: 50vw; height: 50vh; left: -10vw; top: -22vh; background: rgba(160, 84, 40, 0.85); animation: drift2 36s ease-in-out infinite alternate; }
+  .sky .b3 { width: 60vw; height: 70vh; right: -22vw; top: -28vh; background: rgba(118, 156, 128, 0.90); animation: drift3 32s ease-in-out infinite alternate; }
+  .sky .b4 { width: 45vw; height: 55vh; right: -16vw; bottom: -24vh; background: rgba(84, 120, 106, 0.70); animation: drift4 40s ease-in-out infinite alternate; }
   @keyframes drift1 { from { transform: translate(0, 0) scale(1); } to { transform: translate(12vw, -8vh) scale(1.12); } }
   @keyframes drift2 { from { transform: translate(0, 0) scale(1); } to { transform: translate(14vw, 10vh) scale(0.9); } }
   @keyframes drift3 { from { transform: translate(0, 0) scale(1); } to { transform: translate(-14vw, 12vh) scale(1.1); } }
